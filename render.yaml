@@ -3,7 +3,6 @@ services:
     name: quant-trading-backend
     runtime: docker
     dockerfilePath: ./backend/Dockerfile
-    dockerContext: ./backend
     plan: free
     envVars:
       - key: PYTHONIOENCODING
