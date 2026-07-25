@@ -1,0 +1,42 @@
+# ─── Python ───────────────────────────────────────────────────────────────────
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+pip-log.txt
+pip-delete-this-directory.txt
+.env
+.env.local
+
+# ─── Next.js / Node.js ────────────────────────────────────────────────────────
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/build/
+frontend/.env.local
+frontend/.env.development.local
+frontend/.env.test.local
+frontend/.env.production.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ─── System / Database ────────────────────────────────────────────────────────
+logs/
+database/*.db
+database/*.db-journal
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# ─── Machine Learning Models (Keep pre-trained models!) ───────────────────────
+# We explicitly do NOT ignore .pkl files so they are pushed to GitHub 
+# and deployed directly to the cloud server.
+!backend/ml/models/*.pkl
+
+# ─── Local Portable Git Helper ────────────────────────────────────────────────
+mingit/
