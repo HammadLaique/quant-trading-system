@@ -1,14 +1,4 @@
 {
   "version": 2,
-  "name": "quant-trading-dashboard",
-  "builds": [
-    {
-      "src": "package.json",
-      "use": "@vercel/next"
-    }
-  ],
-  "env": {
-    "NEXT_PUBLIC_API_URL": "@quant_api_url",
-    "NEXT_PUBLIC_WS_URL": "@quant_ws_url"
-  }
+  "name": "quant-trading-dashboard"
 }
