@@ -43,7 +43,12 @@ class TradingConfig(BaseSettings):
     RF_MAX_DEPTH: int = 8
     HISTORICAL_DAYS: int = 90                      # Days of history for training
     TRAIN_TEST_SPLIT: float = 0.70
-    MODELS_DIR: str = os.environ.get("MODELS_DIR", os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "backend", "ml", "models"))
+    # Docker WORKDIR is /app (= the backend folder), so models are at /app/ml/models
+    # Locally on Windows, backend is a subdirectory, so models are at backend/ml/models
+    MODELS_DIR: str = os.environ.get(
+        "MODELS_DIR",
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "ml", "models")
+    )
 
     # ─── BINANCE ─────────────────────────────────────────────
     BINANCE_REST_URL: str = "https://api.binance.com"
@@ -52,8 +57,11 @@ class TradingConfig(BaseSettings):
     QUOTE_ASSET: str = "USDT"                      # Base quote currency
 
     # ─── DATABASE ────────────────────────────────────────────
-    DB_PATH: str = os.environ.get("DB_PATH", os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "database", "trading.db"))
-    DB_URL: str = os.environ.get("DB_URL", f"sqlite+aiosqlite:///{os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'database', 'trading.db').replace('\\', '/')}")
+    DB_PATH: str = os.environ.get(
+        "DB_PATH",
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "database", "trading.db")
+    )
+    DB_URL: str = os.environ.get("DB_URL", "")
 
     # ─── FEATURES USED BY ML MODEL ───────────────────────────
     ML_FEATURES: List[str] = [
@@ -63,7 +71,14 @@ class TradingConfig(BaseSettings):
     ]
 
     class Config:
-        env_file = r"D:\quant_trading_system\.env"
+        # Look for .env in the same directory as config.py, then parent
+        _here = os.path.dirname(os.path.abspath(__file__))
+        _parent = os.path.dirname(_here)
+        env_file = (
+            os.path.join(_parent, ".env")
+            if os.path.exists(os.path.join(_parent, ".env"))
+            else os.path.join(_here, ".env")
+        )
         env_file_encoding = "utf-8"
         extra = "ignore"
 

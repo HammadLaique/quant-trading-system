@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: quant-trading-backend
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: free
+    envVars:
+      - key: PYTHONIOENCODING
+        value: utf-8
+      - key: TOP_N_COINS
+        value: "20"
+      - key: INITIAL_BALANCE_USDT
+        value: "100000"
+      - key: DEFAULT_LEVERAGE
+        value: "10"
+      - key: MAX_LEVERAGE
+        value: "50"
+      - key: RISK_PER_TRADE_PERCENT
+        value: "1.0"
+      - key: WIN_PROB_THRESHOLD
+        value: "0.52"
+      - key: FRONTEND_URL
+        value: "https://quant-trading-dashboard.vercel.app"
+    healthCheckPath: /api/health

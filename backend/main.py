@@ -30,7 +30,9 @@ from api.ws_handler import websocket_endpoint
 from core.strategy_runner import runner
 
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# In Docker: main.py lives at /app/main.py, so BASE_DIR = /app
+# Locally: main.py lives at backend/main.py, so BASE_DIR = backend/
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # ─── Ensure critical directories exist ───────────────────────────────────────
 os.makedirs(os.path.join(BASE_DIR, "logs"), exist_ok=True)
