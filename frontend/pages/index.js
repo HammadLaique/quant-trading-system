@@ -12,7 +12,7 @@ import TradeFeed from '../components/TradeFeed';
 import OpenPositions from '../components/OpenPositions';
 import CoinGrid from '../components/CoinGrid';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://quant-trading-system-0nf9.onrender.com/api';
 
 export default function Dashboard() {
   const { connected, portfolio, ticks, tradeEvents } = useTradingSocket();

@@ -4,7 +4,7 @@
  */
 import { useState, useEffect, useRef, useCallback } from 'react';
 
-const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/ws';
+const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'wss://quant-trading-system-0nf9.onrender.com/ws';
 const RECONNECT_DELAY = 3000;
 
 export function useTradingSocket() {
