@@ -16,9 +16,9 @@ class TradingConfig(BaseSettings):
 
     # ─── DEMO ACCOUNT ────────────────────────────────────────
     INITIAL_BALANCE_USDT: float = 100_000.0       # Starting paper money
-    MAX_LEVERAGE: int = 50                         # Max allowed leverage
-    DEFAULT_LEVERAGE: int = 10                     # Default leverage per trade
-    RISK_PER_TRADE_PERCENT: float = 1.0            # % of balance risked per trade (before leverage)
+    MAX_LEVERAGE: int = 100                        # Max allowed leverage
+    DEFAULT_LEVERAGE: int = 100                    # Default 100x leverage per trade
+    RISK_PER_TRADE_PERCENT: float = 1.0            # 1% of balance risked per trade
     MAX_OPEN_TRADES: int = 10                      # Max simultaneous positions
     MAX_DRAWDOWN_PERCENT: float = 20.0             # Emergency stop if drawdown exceeds this
 

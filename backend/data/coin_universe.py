@@ -1,5 +1,6 @@
-﻿"""
+"""
 Fetches and maintains the universe of top N coins by 24h USDT volume on Binance.
+Includes robust fallback for cloud hosting environments.
 """
 
 import aiohttp
@@ -15,41 +16,50 @@ EXCLUDE_SYMBOLS = {
     "BNBUPUSDT", "BNBDOWNUSDT", "ADAUPUSDT", "ADADOWNUSDT",
 }
 
+# Standard liquid top coins fallback (used if Binance REST API blocks cloud server IPs)
+DEFAULT_COINS_FALLBACK = [
+    "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT",
+    "DOGEUSDT", "ADAUSDT", "AVAXUSDT", "SHIBUSDT", "DOTUSDT",
+    "LINKUSDT", "NEARUSDT", "SUIUSDT", "PEPEUSDT", "LTCUSDT",
+    "UNIUSDT", "APTUSDT", "FETUSDT", "TAOUSDT", "TRXUSDT"
+]
+
 
 async def fetch_top_coins(n: int = 100) -> List[str]:
     """
     Fetch the top N USDT-quoted coins by 24h quote volume from Binance.
-    Returns a list of symbols like ['BTCUSDT', 'ETHUSDT', ...]
+    Falls back gracefully if Binance REST API fails.
     """
     url = f"{settings.BINANCE_REST_URL}/api/v3/ticker/24hr"
     logger.info(f"Fetching top {n} coins by 24h volume from Binance...")
 
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url) as resp:
-            if resp.status != 200:
-                raise RuntimeError(f"Binance API error: {resp.status}")
-            tickers = await resp.json()
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
+            async with session.get(url) as resp:
+                if resp.status == 200:
+                    tickers = await resp.json()
+                    usdt_pairs = [
+                        t for t in tickers
+                        if t["symbol"].endswith("USDT")
+                        and t["symbol"] not in EXCLUDE_SYMBOLS
+                        and not any(bad in t["symbol"] for bad in ["UP", "DOWN", "BEAR", "BULL"])
+                    ]
+                    usdt_pairs.sort(key=lambda x: float(x.get("quoteVolume", 0)), reverse=True)
+                    top_symbols = [t["symbol"] for t in usdt_pairs[:n]]
+                    if top_symbols:
+                        logger.success(f"[OK] Top {len(top_symbols)} coins selected from Binance REST API")
+                        return top_symbols
+                else:
+                    logger.warning(f"Binance API returned status {resp.status}. Using top coin fallback list.")
+    except Exception as e:
+        logger.warning(f"Binance REST API fetch error ({e}). Using top coin fallback list.")
 
-    # Filter for USDT pairs only, exclude bad tokens
-    usdt_pairs = [
-        t for t in tickers
-        if t["symbol"].endswith("USDT")
-        and t["symbol"] not in EXCLUDE_SYMBOLS
-        and not any(bad in t["symbol"] for bad in ["UP", "DOWN", "BEAR", "BULL"])
-    ]
-
-    # Sort by 24h quote volume (descending)
-    usdt_pairs.sort(key=lambda x: float(x.get("quoteVolume", 0)), reverse=True)
-
-    # Take top N
-    top_symbols = [t["symbol"] for t in usdt_pairs[:n]]
-
-    logger.success(f"[OK] Top {len(top_symbols)} coins selected")
-    logger.debug(f"Coins: {', '.join(top_symbols[:10])} ...")
-    return top_symbols
+    fallback = DEFAULT_COINS_FALLBACK[:n]
+    logger.success(f"[OK] Using fallback universe of {len(fallback)} top coins")
+    return fallback
 
 
-# Cached list (refreshed periodically by the strategy runner)
+# Cached list
 _cached_coins: List[str] = []
 
 
@@ -66,4 +76,3 @@ async def refresh_coin_universe() -> List[str]:
     global _cached_coins
     _cached_coins = await fetch_top_coins(settings.TOP_N_COINS)
     return _cached_coins
-

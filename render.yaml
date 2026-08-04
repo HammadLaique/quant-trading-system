@@ -12,11 +12,13 @@ services:
       - key: INITIAL_BALANCE_USDT
         value: "100000"
       - key: DEFAULT_LEVERAGE
-        value: "10"
+        value: "100"
       - key: MAX_LEVERAGE
-        value: "50"
+        value: "100"
       - key: RISK_PER_TRADE_PERCENT
         value: "1.0"
+      - key: MAX_OPEN_TRADES
+        value: "10"
       - key: WIN_PROB_THRESHOLD
         value: "0.52"
       - key: FRONTEND_URL

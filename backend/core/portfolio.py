@@ -1,4 +1,4 @@
-﻿"""
+"""
 Paper Trading Portfolio.
 Tracks demo account balance, open positions, trade history, P&L.
 Fully supports leveraged futures-style trading simulation.
@@ -141,8 +141,12 @@ class Portfolio:
         """
         leverage = leverage or settings.DEFAULT_LEVERAGE
 
-        # Position sizing: risk fixed % of current balance
-        risk_amount = self.balance * (settings.RISK_PER_TRADE_PERCENT / 100)
+        # Dynamic risk scaling: base risk is 1.0%, but as open positions increase (up to 10),
+        # position margin scales down proportionately so total wallet risk stays safe at 100x leverage
+        open_count = self.open_positions_count
+        scale_factor = 1.0 if open_count < 4 else (4.0 / (open_count + 1))
+        effective_risk_pct = settings.RISK_PER_TRADE_PERCENT * scale_factor
+        risk_amount = self.balance * (effective_risk_pct / 100)
 
         if direction == 1:  # Long
             risk_per_unit = entry_price - sl_price
