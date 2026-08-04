@@ -23,9 +23,18 @@ export default function Dashboard() {
   useEffect(() => {
     fetch(`${API_URL}/coins`)
       .then(r => r.json())
-      .then(data => setCoins(data.coins || []))
       .catch(() => {});
   }, []);
+
+  // Compute active coin list dynamically (from REST API, WebSocket stream, or default list)
+  const DEFAULT_COINS = [
+    "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT",
+    "DOGEUSDT", "ADAUSDT", "AVAXUSDT", "SHIBUSDT", "DOTUSDT",
+    "LINKUSDT", "NEARUSDT", "SUIUSDT", "PEPEUSDT", "LTCUSDT",
+    "UNIUSDT", "APTUSDT", "FETUSDT", "TAOUSDT", "TRXUSDT"
+  ];
+  const wsCoins = (portfolio.strategy_status || []).map(s => s.symbol);
+  const displayCoins = coins.length > 0 ? coins : (wsCoins.length > 0 ? wsCoins : DEFAULT_COINS);
 
   return (
     <>
@@ -109,7 +118,7 @@ export default function Dashboard() {
           {activeTab === 'coins' && (
             <div style={{ marginTop: 16 }}>
               <CoinGrid
-                coins={coins}
+                coins={displayCoins}
                 ticks={ticks}
                 positions={portfolio.open_positions_list || []}
                 strategies={portfolio.strategy_status || []}
