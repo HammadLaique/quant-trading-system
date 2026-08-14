@@ -1,4 +1,4 @@
-﻿"""
+"""
 REST API Routes.
 All HTTP endpoints for the trading dashboard.
 """
@@ -22,10 +22,17 @@ async def health():
 @router.get("/portfolio")
 async def get_portfolio():
     """Full portfolio stats + open positions."""
-    return {
-        "stats": portfolio.get_stats(),
-        "open_positions": [p.to_dict() for p in portfolio.positions.values()],
-    }
+    try:
+        return {
+            "stats": portfolio.get_stats(),
+            "open_positions": [p.to_dict() for p in portfolio.positions.values()],
+        }
+    except Exception as e:
+        logger.error(f"Error getting portfolio: {e}")
+        return {
+            "stats": portfolio.get_stats(),
+            "open_positions": [],
+        }
 
 
 @router.get("/portfolio/equity-curve")
