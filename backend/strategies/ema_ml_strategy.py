@@ -46,9 +46,8 @@ class EMAMLStrategy:
         """
         logger.info(f"[{self.symbol}] Initializing strategy...")
 
-        # ── Step 1: Check if model exists ──────────────────────────────
-        has_model = model_exists(self.symbol)
-        fetch_days = 2 if has_model else settings.HISTORICAL_DAYS
+        # For live trading, we only need 2 days (1,500 candles) to pre-fill the rolling buffer
+        fetch_days = 2
 
         # ── Step 2: Fetch historical data ──────────────────────────────
         df_hist = pd.DataFrame()
