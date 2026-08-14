@@ -302,7 +302,7 @@ class Portfolio:
         losses = [t for t in self.closed_trades if t.pnl_usdt <= 0]
         gross_profit = sum(t.pnl_usdt for t in wins)
         gross_loss = abs(sum(t.pnl_usdt for t in losses))
-        profit_factor = gross_profit / gross_loss if gross_loss > 0 else float("inf")
+        profit_factor = round(gross_profit / gross_loss, 2) if gross_loss > 0 else 0.0
 
         return {
             "balance": round(self.balance, 2),
