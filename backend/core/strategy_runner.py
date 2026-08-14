@@ -1,4 +1,4 @@
-﻿"""
+"""
 Strategy Runner.
 Manages all strategy instances across 100 coins.
 Initializes strategies in batches, subscribes to Binance WebSocket streams,
@@ -79,8 +79,8 @@ class StrategyRunner:
             tasks = [self.strategies[s].initialize() for s in batch]
             await asyncio.gather(*tasks, return_exceptions=True)
 
-            self.initialized_count += sum(
-                1 for s in batch if self.strategies[s].initialized
+            self.initialized_count = sum(
+                1 for s in symbols if self.strategies[s].initialized
             )
 
             progress = min(i + self.INIT_BATCH_SIZE, total)
