@@ -19,9 +19,6 @@ from config import settings
 
 BINANCE_REST_ENDPOINTS = [
     "https://data-api.binance.vision",
-    "https://api1.binance.com",
-    "https://api2.binance.com",
-    "https://api3.binance.com",
     "https://api.binance.com",
 ]
 
@@ -34,7 +31,7 @@ async def fetch_klines(
     end_time: Optional[int] = None,
 ) -> pd.DataFrame:
     """
-    Fetch historical klines from Binance REST API trying multiple endpoints.
+    Fetch historical klines from Binance REST API trying fast endpoints with 1.5s timeout.
     """
     params = {"symbol": symbol.upper(), "interval": interval, "limit": limit}
     if start_time:
@@ -45,7 +42,7 @@ async def fetch_klines(
     for base_url in BINANCE_REST_ENDPOINTS:
         url = f"{base_url}/api/v3/klines"
         try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8)) as session:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=1.5)) as session:
                 async with session.get(url, params=params) as resp:
                     if resp.status == 200:
                         data = await resp.json()

@@ -26,8 +26,8 @@ class StrategyRunner:
     5. Periodically broadcasts state to connected WebSocket clients
     """
 
-    INIT_BATCH_SIZE = 5    # Initialize N strategies at a time
-    INIT_BATCH_DELAY = 2   # Seconds between batches (rate limit)
+    INIT_BATCH_SIZE = 25   # Initialize N strategies at a time
+    INIT_BATCH_DELAY = 0.1  # Seconds between batches
 
     def __init__(self):
         self.strategies: Dict[str, EMAMLStrategy] = {}
