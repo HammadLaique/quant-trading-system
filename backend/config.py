@@ -19,7 +19,7 @@ class TradingConfig(BaseSettings):
     MAX_LEVERAGE: int = 100                        # Max allowed leverage
     DEFAULT_LEVERAGE: int = 100                    # Default 100x leverage per trade
     RISK_PER_TRADE_PERCENT: float = 1.0            # 1% of balance risked per trade
-    MAX_OPEN_TRADES: int = 10                      # Max simultaneous positions
+    MAX_OPEN_TRADES: int = 20                      # Max simultaneous positions (20)
     MAX_DRAWDOWN_PERCENT: float = 20.0             # Emergency stop if drawdown exceeds this
 
     # ─── STRATEGY ────────────────────────────────────────────
@@ -53,7 +53,7 @@ class TradingConfig(BaseSettings):
     # ─── BINANCE ─────────────────────────────────────────────
     BINANCE_REST_URL: str = "https://api.binance.com"
     BINANCE_WS_URL: str = "wss://stream.binance.com:9443"
-    TOP_N_COINS: int = 100                         # How many coins to track
+    TOP_N_COINS: int = 300                         # How many coins to track (top trending)
     QUOTE_ASSET: str = "USDT"                      # Base quote currency
 
     # ─── DATABASE ────────────────────────────────────────────

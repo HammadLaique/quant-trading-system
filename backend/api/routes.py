@@ -148,3 +148,36 @@ async def reset_portfolio():
     logger.warning("⚠️ Portfolio reset to initial state!")
     return {"message": "Portfolio reset successfully", "balance": portfolio.balance}
 
+
+@router.post("/positions/{position_id}/close")
+async def force_close_position(position_id: str):
+    """Force-close an open position at the current live price (manual override)."""
+    from data.binance_client import get_ticker_price
+
+    pos = portfolio.positions.get(position_id)
+    if not pos:
+        raise HTTPException(status_code=404, detail=f"Position {position_id} not found")
+
+    try:
+        current_price = await get_ticker_price(pos.symbol)
+    except Exception:
+        current_price = pos.current_price
+
+    trade = portfolio.close_position(
+        position_id=position_id,
+        exit_price=float(current_price),
+        outcome="FORCE_CLOSED",
+        win_probability=float(pos.win_probability if hasattr(pos, 'win_probability') else 0.0),
+    )
+
+    if trade:
+        logger.info(f"[{pos.symbol}] Force-closed by user | P&L: ${trade.pnl_usdt:+.2f}")
+        return {
+            "message": f"Position {position_id} closed successfully",
+            "symbol": pos.symbol,
+            "exit_price": current_price,
+            "pnl_usdt": round(trade.pnl_usdt, 2),
+        }
+    raise HTTPException(status_code=500, detail="Failed to close position")
+
+

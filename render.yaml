@@ -8,7 +8,7 @@ services:
       - key: PYTHONIOENCODING
         value: utf-8
       - key: TOP_N_COINS
-        value: "20"
+        value: "300"
       - key: INITIAL_BALANCE_USDT
         value: "100000"
       - key: DEFAULT_LEVERAGE
@@ -18,7 +18,7 @@ services:
       - key: RISK_PER_TRADE_PERCENT
         value: "1.0"
       - key: MAX_OPEN_TRADES
-        value: "10"
+        value: "20"
       - key: WIN_PROB_THRESHOLD
         value: "0.52"
       - key: FRONTEND_URL

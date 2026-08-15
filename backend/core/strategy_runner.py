@@ -1,8 +1,9 @@
 """
 Strategy Runner.
-Manages all strategy instances across 100 coins.
+Manages all strategy instances across up to 300 trending coins.
 Initializes strategies in batches, subscribes to Binance WebSocket streams,
-and routes incoming candle data to the correct strategy.
+routes incoming candle data to the correct strategy, and refreshes the coin
+universe every 24 hours.
 """
 
 import asyncio
@@ -10,7 +11,7 @@ from typing import Dict, List
 from loguru import logger
 
 from config import settings
-from data.coin_universe import get_coin_universe
+from data.coin_universe import get_coin_universe, maybe_refresh_coin_universe, refresh_coin_universe
 from data.binance_client import BinanceStreamManager
 from strategies.ema_ml_strategy import EMAMLStrategy
 from api.ws_handler import broadcast_tick, broadcast_trade_event, broadcast_portfolio
@@ -63,8 +64,9 @@ class StrategyRunner:
             on_kline_close=self._on_kline,
         )
 
-        # Step 5: Start background broadcasting task
+        # Step 5: Start background tasks
         asyncio.create_task(self._broadcast_loop())
+        asyncio.create_task(self._coin_refresh_loop())
 
         # Step 6: Start WebSocket (runs forever)
         await self.stream_manager.start()
@@ -130,6 +132,30 @@ class StrategyRunner:
             except Exception as e:
                 logger.error(f"Broadcast error: {e}")
             await asyncio.sleep(2)  # Broadcast every 2 seconds
+
+    async def _coin_refresh_loop(self):
+        """Every 24 hours, refresh the coin universe and spin up strategies for new coins."""
+        REFRESH_EVERY = 24 * 60 * 60  # 24 hours in seconds
+        while self.running:
+            await asyncio.sleep(REFRESH_EVERY)
+            try:
+                logger.info("[Coin Refresh] 24h refresh cycle started...")
+                new_coins = await refresh_coin_universe()
+                added = 0
+                for sym in new_coins:
+                    if sym not in self.strategies:
+                        strat = EMAMLStrategy(symbol=sym, leverage=settings.DEFAULT_LEVERAGE)
+                        await strat.initialize()
+                        if strat.initialized:
+                            self.strategies[sym] = strat
+                            added += 1
+                        await asyncio.sleep(0.05)  # Slight delay between new inits
+                if added:
+                    logger.success(f"[Coin Refresh] Added {added} new coins to the universe")
+                else:
+                    logger.info("[Coin Refresh] No new coins added")
+            except Exception as e:
+                logger.error(f"[Coin Refresh] Error during refresh: {e}")
 
     async def stop(self):
         self.running = False
