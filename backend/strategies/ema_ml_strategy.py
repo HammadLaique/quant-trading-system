@@ -160,13 +160,18 @@ class EMAMLStrategy:
 
         signal = get_live_signal(df)
 
-        if signal == 0 or signal == self.last_signal:
+        if signal == 0:
             return
 
         self.last_signal = signal
 
+        # Don't double up on the same symbol
         existing = portfolio.get_positions_by_symbol(self.symbol)
-        if any(p.direction == signal for p in existing):
+        if len(existing) > 0:
+            return
+
+        # Respect max simultaneous trades limit (20)
+        if len(portfolio.positions) >= settings.MAX_OPEN_TRADES:
             return
 
         # ── ML Gate ────────────────────────────────────────────────────

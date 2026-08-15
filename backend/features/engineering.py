@@ -1,4 +1,4 @@
-﻿"""
+"""
 Feature Engineering Pipeline.
 Calculates all technical indicators used by the ML model and signal generator.
 Matches exactly the feature set from the original strategy:
@@ -95,26 +95,37 @@ def _calculate_macd_divergence(df: pd.DataFrame) -> pd.Series:
 
 def _generate_signals(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Primary Signal: EMA20/EMA200 crossover
-        +1 = EMA20 crosses above EMA200 (bullish)
-        -1 = EMA20 crosses below EMA200 (bearish)
-         0 = no signal
-
-    Filtered Signal: only keep if price is on correct side of 5m EMA200
+    Generate actionable trade signals:
+    1. Primary: EMA20/EMA200 crossover (instant trend flip)
+    2. Trend Momentum: EMA20 aligned with EMA200 + MACD histogram expansion + price momentum
+    Filtered by 5-minute higher timeframe trend direction.
     """
-    # EMA crossover detection
-    above = df["EMA20"] > df["EMA200"]
-    cross_up = above & ~above.shift(1).fillna(False)    # just crossed up
-    cross_down = ~above & above.shift(1).fillna(True)   # just crossed down
+    above_200 = df["EMA20"] > df["EMA200"]
+    cross_up = above_200 & ~above_200.shift(1).fillna(False)
+    cross_down = ~above_200 & above_200.shift(1).fillna(True)
+
+    # Momentum breakout / continuation
+    bullish_momentum = (
+        above_200
+        & (df["Close"] > df["EMA20"])
+        & (df["MACD_Hist"] > 0)
+        & (df["Price_Momentum"] > 0)
+    )
+    bearish_momentum = (
+        ~above_200
+        & (df["Close"] < df["EMA20"])
+        & (df["MACD_Hist"] < 0)
+        & (df["Price_Momentum"] < 0)
+    )
 
     df["Signal"] = 0
-    df.loc[cross_up, "Signal"] = 1
-    df.loc[cross_down, "Signal"] = -1
+    df.loc[cross_up | bullish_momentum, "Signal"] = 1
+    df.loc[cross_down | bearish_momentum, "Signal"] = -1
 
-    # HTF filter
+    # HTF trend filter: 5m EMA200
     df["Signal_Filtered"] = 0
-    long_ok = (df["Signal"] == 1) & (df["Close"] > df["ema_200_5m"])
-    short_ok = (df["Signal"] == -1) & (df["Close"] < df["ema_200_5m"])
+    long_ok = (df["Signal"] == 1) & (df["Close"] >= df["ema_200_5m"])
+    short_ok = (df["Signal"] == -1) & (df["Close"] <= df["ema_200_5m"])
     df.loc[long_ok, "Signal_Filtered"] = 1
     df.loc[short_ok, "Signal_Filtered"] = -1
 
