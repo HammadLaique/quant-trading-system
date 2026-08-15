@@ -1,6 +1,6 @@
 /**
- * CoinGrid — Grid of all 100 coins showing live prices and status
- * Color-coded: green = long position, red = short, yellow = signal, default = monitoring
+ * CoinGrid — Grid of all trending coins showing live prices and status
+ * Color-coded: green = long position, red = short, yellow = real active signal, default = monitoring
  */
 import { useMemo } from 'react';
 
@@ -11,8 +11,9 @@ function CoinTile({ symbol, tick, positions, strategies }) {
   const hasLong = symbolPositions.some(p => p.direction === 1);
   const hasShort = symbolPositions.some(p => p.direction === -1);
 
+  // Fix: Only true if strategy actually exists and signal is 1 or -1
   const strat = strategies.find(s => s.symbol === symbol);
-  const hasSignal = strat?.last_signal !== 0;
+  const hasSignal = !!strat && strat.last_signal !== 0 && strat.last_signal !== undefined && strat.last_signal !== null;
 
   let tileClass = 'coin-tile';
   if (hasLong) tileClass += ' has-position-long';
@@ -25,32 +26,40 @@ function CoinTile({ symbol, tick, positions, strategies }) {
       {price ? (
         <div className="coin-price">${formatPrice(price)}</div>
       ) : (
-        <div className="coin-price" style={{ color: 'var(--text-muted)' }}>Loading...</div>
+        <div className="coin-price" style={{ color: 'var(--text-muted)' }}>--</div>
       )}
-      {symbolPositions.length > 0 && (
+      {symbolPositions.length > 0 ? (
         <div className={`coin-change ${hasLong ? 'positive' : 'negative'}`}>
           {hasLong ? '▲ LONG' : '▼ SHORT'}
         </div>
-      )}
-      {strat && !symbolPositions.length && (
-        <div style={{ marginTop: 2, height: 3, borderRadius: 2, background: 'var(--bg-elevated)' }}>
-          <div style={{
-            width: strat.model_ready ? '80%' : '0%',
-            height: '100%',
-            background: 'var(--accent-cyan)',
-            borderRadius: 2,
-            opacity: 0.5,
-          }} />
+      ) : hasSignal ? (
+        <div className="coin-change" style={{ color: 'var(--accent-yellow)' }}>
+          ⚡ {strat.last_signal === 1 ? 'BUY' : 'SELL'}
         </div>
+      ) : (
+        strat && (
+          <div style={{ marginTop: 4, height: 2, borderRadius: 1, background: 'var(--bg-elevated)' }}>
+            <div style={{
+              width: strat.model_ready ? '100%' : '50%',
+              height: '100%',
+              background: strat.model_ready ? 'var(--accent-green)' : 'var(--accent-cyan)',
+              borderRadius: 1,
+              opacity: 0.6,
+            }} />
+          </div>
+        )
       )}
     </div>
   );
 }
 
 function formatPrice(price) {
-  if (price >= 1000) return price.toLocaleString('en', { maximumFractionDigits: 2 });
-  if (price >= 1) return price.toFixed(4);
-  return price.toFixed(6);
+  if (!price && price !== 0) return '--';
+  const num = typeof price === 'string' ? parseFloat(price) : price;
+  if (isNaN(num)) return '--';
+  if (num >= 1000) return num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  if (num >= 1) return num.toFixed(4);
+  return num.toFixed(6);
 }
 
 export default function CoinGrid({ coins = [], ticks = {}, positions = [], strategies = [] }) {
@@ -60,11 +69,11 @@ export default function CoinGrid({ coins = [], ticks = {}, positions = [], strat
         <div className="card-title" style={{ marginBottom: 0 }}>
           Coin Universe
         </div>
-        <div style={{ display: 'flex', gap: 10, fontSize: 10, color: 'var(--text-muted)' }}>
-          <span>🟢 Long</span>
-          <span>🔴 Short</span>
-          <span>🟡 Signal</span>
-          <span style={{ color: 'var(--text-secondary)' }}>{coins.length} coins</span>
+        <div style={{ display: 'flex', gap: 12, fontSize: 11, color: 'var(--text-muted)' }}>
+          <span style={{ color: 'var(--accent-green)' }}>● Long</span>
+          <span style={{ color: 'var(--accent-red)' }}>● Short</span>
+          <span style={{ color: 'var(--accent-yellow)' }}>● Signal</span>
+          <span style={{ color: 'var(--accent-cyan)', fontWeight: 600 }}>{coins.length} coins</span>
         </div>
       </div>
       <div className="coin-grid">

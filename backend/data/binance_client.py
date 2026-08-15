@@ -128,7 +128,8 @@ def _interval_to_ms(interval: str) -> int:
 
 class BinanceStreamManager:
     """
-    Manages a single combined WebSocket connection to Binance for multiple symbols.
+    Manages WebSocket connection to Binance for up to 300+ symbols.
+    Subscribes via JSON payload in chunks of 50 to avoid URI length limits.
     Fires a callback on every kline event.
     """
 
@@ -140,28 +141,52 @@ class BinanceStreamManager:
 
     async def start(self):
         self._running = True
-        streams = "/".join([f"{s}@kline_{settings.TIMEFRAME}" for s in self.symbols])
-        url = f"{settings.BINANCE_WS_URL}/stream?streams={streams}"
+        ws_endpoints = [
+            "wss://stream.binance.com:9443/ws",
+            "wss://data-stream.binance.vision/ws",
+            "wss://stream.binance.com:443/ws",
+        ]
+        endpoint_idx = 0
 
         logger.info(f"Connecting to Binance WS for {len(self.symbols)} symbols...")
 
         while self._running:
+            url = ws_endpoints[endpoint_idx % len(ws_endpoints)]
             try:
                 async with websockets.connect(
                     url,
                     ping_interval=20,
                     ping_timeout=10,
                     close_timeout=5,
+                    max_size=10_000_000,
                 ) as ws:
                     self._ws = ws
-                    logger.success("[OK] Binance WebSocket connected")
+                    logger.success(f"[OK] Binance WebSocket connected to {url}")
+
+                    # Subscribe in batches of 50 streams
+                    all_streams = [f"{s}@kline_{settings.TIMEFRAME}" for s in self.symbols]
+                    chunk_size = 50
+                    for i in range(0, len(all_streams), chunk_size):
+                        chunk = all_streams[i : i + chunk_size]
+                        sub_msg = {
+                            "method": "SUBSCRIBE",
+                            "params": chunk,
+                            "id": i + 1,
+                        }
+                        await ws.send(json.dumps(sub_msg))
+                        await asyncio.sleep(0.05)
+
+                    logger.info(f"Subscribed to {len(all_streams)} kline streams successfully")
+
                     async for message in ws:
                         await self._handle_message(message)
             except websockets.ConnectionClosed as e:
                 logger.warning(f"WS connection closed: {e}. Reconnecting in 3s...")
+                endpoint_idx += 1
                 await asyncio.sleep(3)
             except Exception as e:
                 logger.error(f"WS error: {e}. Reconnecting in 5s...")
+                endpoint_idx += 1
                 await asyncio.sleep(5)
 
     async def stop(self):
@@ -173,7 +198,12 @@ class BinanceStreamManager:
         """Parse incoming kline message and fire callback on candle close."""
         try:
             msg = json.loads(raw)
-            data = msg.get("data", {})
+            # Handle subscription responses
+            if "result" in msg and "id" in msg:
+                return
+
+            # Support both {"data": {"k": ...}} and direct {"k": ...}
+            data = msg.get("data", msg)
             kline = data.get("k", {})
 
             if not kline:

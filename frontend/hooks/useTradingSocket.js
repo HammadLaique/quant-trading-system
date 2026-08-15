@@ -70,6 +70,37 @@ export function useTradingSocket() {
     }
   }, []);
 
+  // Fetch initial market prices so coins never stay stuck on Loading
+  useEffect(() => {
+    const fetchInitialPrices = async () => {
+      const urls = [
+        'https://data-api.binance.vision/api/v3/ticker/price',
+        'https://api.binance.com/api/v3/ticker/price',
+      ];
+      for (const url of urls) {
+        try {
+          const res = await fetch(url);
+          if (res.ok) {
+            const data = await res.json();
+            const tickMap = {};
+            for (const item of data) {
+              if (item.symbol?.endsWith('USDT')) {
+                tickMap[item.symbol] = { price: parseFloat(item.price), is_closed: false };
+              }
+            }
+            setTicks(prev => ({ ...tickMap, ...prev }));
+            break;
+          }
+        } catch (e) {
+          // try next url
+        }
+      }
+    };
+    fetchInitialPrices();
+    const interval = setInterval(fetchInitialPrices, 10000); // refresh every 10s as background fallback
+    return () => clearInterval(interval);
+  }, []);
+
   const handleMessage = (data) => {
     if (!data?.type) return;
 
