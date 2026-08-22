@@ -50,11 +50,11 @@ class TradingConfig(BaseSettings):
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "ml", "models")
     )
 
-    # ─── BINANCE ─────────────────────────────────────────────
-    BINANCE_REST_URL: str = "https://api.binance.com"
-    BINANCE_WS_URL: str = "wss://stream.binance.com:9443"
-    TOP_N_COINS: int = 300                         # How many coins to track (top trending)
-    QUOTE_ASSET: str = "USDT"                      # Base quote currency
+    # ─── BINANCE FUTURES (Perpetual) ─────────────────────────
+    BINANCE_REST_URL: str = "https://fapi.binance.com"         # Futures REST API
+    BINANCE_WS_URL: str = "wss://fstream.binance.com"          # Futures WebSocket stream
+    TOP_N_COINS: int = 300                                      # How many coins to track (top trending)
+    QUOTE_ASSET: str = "USDT"                                   # Base quote currency
 
     # ─── DATABASE ────────────────────────────────────────────
     DB_PATH: str = os.environ.get(

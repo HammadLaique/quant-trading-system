@@ -1,11 +1,19 @@
 /**
  * Custom React hook for managing the WebSocket connection to the backend.
- * Handles auto-reconnect, message parsing, and state updates.
+ * Uses Binance FUTURES prices (fapi.binance.com) for initial price seed.
+ * WebSocket ticks from the backend stream update prices in real-time.
+ * REST polling is only done ONCE on mount — WS is the live price source.
  */
 import { useState, useEffect, useRef, useCallback } from 'react';
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'wss://quant-trading-system-0nf9.onrender.com/ws';
 const RECONNECT_DELAY = 3000;
+
+// Binance Futures price endpoint (no API key needed)
+const FUTURES_PRICE_URLS = [
+  'https://fapi.binance.com/fapi/v1/ticker/price',
+  'https://fapi1.binance.com/fapi/v1/ticker/price',
+];
 
 export function useTradingSocket() {
   const [connected, setConnected] = useState(false);
@@ -25,10 +33,12 @@ export function useTradingSocket() {
     recent_trades: [],
     strategy_status: [],
   });
-  const [ticks, setTicks] = useState({});        // symbol → { price, is_closed }
+  const [ticks, setTicks] = useState({});
   const [tradeEvents, setTradeEvents] = useState([]);
   const wsRef = useRef(null);
   const reconnectTimer = useRef(null);
+  // Track whether WS ticks have started flowing — avoid overwriting with stale REST data after that
+  const wsTicksActive = useRef(false);
 
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
@@ -39,7 +49,8 @@ export function useTradingSocket() {
 
       ws.onopen = () => {
         setConnected(true);
-        // Send ping every 25s to keep alive
+        wsTicksActive.current = false;
+        // Keepalive ping every 25s
         const pingInterval = setInterval(() => {
           if (ws.readyState === WebSocket.OPEN) ws.send('ping');
         }, 25000);
@@ -49,6 +60,8 @@ export function useTradingSocket() {
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
+          // Mark WS ticks as active once we get the first tick
+          if (data?.type === 'tick') wsTicksActive.current = true;
           handleMessage(data);
         } catch (e) {
           // ignore parse errors
@@ -57,8 +70,8 @@ export function useTradingSocket() {
 
       ws.onclose = () => {
         setConnected(false);
+        wsTicksActive.current = false;
         clearInterval(ws._pingInterval);
-        // Auto-reconnect
         reconnectTimer.current = setTimeout(connect, RECONNECT_DELAY);
       };
 
@@ -70,14 +83,11 @@ export function useTradingSocket() {
     }
   }, []);
 
-  // Fetch initial market prices so coins never stay stuck on Loading
+  // Seed initial prices ONCE from Binance FUTURES REST API on mount.
+  // After WebSocket ticks start flowing, we NEVER overwrite with REST polling.
   useEffect(() => {
-    const fetchInitialPrices = async () => {
-      const urls = [
-        'https://data-api.binance.vision/api/v3/ticker/price',
-        'https://api.binance.com/api/v3/ticker/price',
-      ];
-      for (const url of urls) {
+    const seedFuturesPrices = async () => {
+      for (const url of FUTURES_PRICE_URLS) {
         try {
           const res = await fetch(url);
           if (res.ok) {
@@ -88,7 +98,11 @@ export function useTradingSocket() {
                 tickMap[item.symbol] = { price: parseFloat(item.price), is_closed: false };
               }
             }
-            setTicks(prev => ({ ...tickMap, ...prev }));
+            // Only set seed prices if WebSocket hasn't started delivering ticks yet
+            setTicks(prev => {
+              if (wsTicksActive.current) return prev; // WS is live — don't overwrite
+              return { ...tickMap, ...prev };
+            });
             break;
           }
         } catch (e) {
@@ -96,9 +110,9 @@ export function useTradingSocket() {
         }
       }
     };
-    fetchInitialPrices();
-    const interval = setInterval(fetchInitialPrices, 10000); // refresh every 10s as background fallback
-    return () => clearInterval(interval);
+
+    seedFuturesPrices();
+    // No polling interval — WebSocket is the real-time source after first load
   }, []);
 
   const handleMessage = (data) => {
@@ -117,16 +131,21 @@ export function useTradingSocket() {
           win_rate: data.win_rate ?? prev.win_rate,
           profit_factor: data.profit_factor ?? prev.profit_factor,
           drawdown_pct: data.drawdown_pct ?? prev.drawdown_pct,
-          open_positions: Array.isArray(data.open_positions) ? data.open_positions.length : (data.open_positions ?? prev.open_positions),
+          open_positions: Array.isArray(data.open_positions)
+            ? data.open_positions.length
+            : (data.open_positions ?? prev.open_positions),
           total_trades: data.total_trades ?? prev.total_trades,
           equity_curve: data.equity_curve ?? prev.equity_curve,
-          open_positions_list: Array.isArray(data.open_positions) ? data.open_positions : prev.open_positions_list,
+          open_positions_list: Array.isArray(data.open_positions)
+            ? data.open_positions
+            : prev.open_positions_list,
           recent_trades: data.recent_trades ?? prev.recent_trades,
           strategy_status: data.strategy_status ?? prev.strategy_status,
         }));
         break;
 
       case 'tick':
+        // Real-time price tick from Binance Futures WebSocket — highest priority update
         if (data.symbol) {
           setTicks(prev => ({
             ...prev,

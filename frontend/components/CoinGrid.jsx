@@ -11,7 +11,6 @@ function CoinTile({ symbol, tick, positions, strategies }) {
   const hasLong = symbolPositions.some(p => p.direction === 1);
   const hasShort = symbolPositions.some(p => p.direction === -1);
 
-  // Fix: Only true if strategy actually exists and signal is 1 or -1
   const strat = strategies.find(s => s.symbol === symbol);
   const hasSignal = !!strat && strat.last_signal !== 0 && strat.last_signal !== undefined && strat.last_signal !== null;
 

@@ -82,15 +82,15 @@ async def _fetch_coingecko_trending() -> Set[str]:
     return symbols
 
 
-# ── Source 2 + 3: Binance 24h Data ───────────────────────────────────────────
+# ── Source 2 + 3: Binance Futures 24h Data ────────────────────────────────────
 BINANCE_TICKER_ENDPOINTS = [
-    "https://data-api.binance.vision/api/v3/ticker/24hr",
-    "https://api.binance.com/api/v3/ticker/24hr",
+    "https://fapi.binance.com/fapi/v1/ticker/24hr",
+    "https://fapi1.binance.com/fapi/v1/ticker/24hr",
 ]
 
 
 async def _fetch_binance_tickers() -> list:
-    """Fetch all 24h ticker data from Binance."""
+    """Fetch all 24h ticker data from Binance FUTURES (perpetual)."""
     for url in BINANCE_TICKER_ENDPOINTS:
         try:
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=6)) as session:

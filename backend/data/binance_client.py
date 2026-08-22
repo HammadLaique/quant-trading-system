@@ -1,8 +1,9 @@
 """
-Binance public data client.
-- REST: fetch historical klines (no API key required)
-- WebSocket: subscribe to live 1-minute kline streams
-Includes multi-domain fallback for cloud hosting environments.
+Binance FUTURES public data client.
+Uses Binance Perpetual Futures (USDM) endpoints:
+- REST:  https://fapi.binance.com/fapi/v1/
+- WS:    wss://fstream.binance.com/ws
+No API key needed for public market data (klines, ticker, price).
 """
 
 import asyncio
@@ -17,21 +18,30 @@ from loguru import logger
 from config import settings
 
 
-BINANCE_REST_ENDPOINTS = [
-    "https://data-api.binance.vision",
-    "https://api.binance.com",
+# ── Futures REST endpoints (with fallback) ───────────────────────────────────
+FAPI_ENDPOINTS = [
+    "https://fapi.binance.com",
+    "https://fapi1.binance.com",
+    "https://fapi2.binance.com",
+]
+
+# ── Futures WebSocket endpoints ───────────────────────────────────────────────
+FSTREAM_ENDPOINTS = [
+    "wss://fstream.binance.com/ws",
+    "wss://fstream1.binance.com/ws",
 ]
 
 
 async def fetch_klines(
     symbol: str,
     interval: str = "1m",
-    limit: int = 1000,
+    limit: int = 500,
     start_time: Optional[int] = None,
     end_time: Optional[int] = None,
 ) -> pd.DataFrame:
     """
-    Fetch historical klines from Binance REST API trying fast endpoints with 1.5s timeout.
+    Fetch historical klines from Binance Futures REST API.
+    Uses /fapi/v1/klines endpoint with 1.5s timeout.
     """
     params = {"symbol": symbol.upper(), "interval": interval, "limit": limit}
     if start_time:
@@ -39,8 +49,8 @@ async def fetch_klines(
     if end_time:
         params["endTime"] = end_time
 
-    for base_url in BINANCE_REST_ENDPOINTS:
-        url = f"{base_url}/api/v3/klines"
+    for base_url in FAPI_ENDPOINTS:
+        url = f"{base_url}/fapi/v1/klines"
         try:
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=1.5)) as session:
                 async with session.get(url, params=params) as resp:
@@ -57,20 +67,20 @@ async def fetch_klines(
 async def fetch_klines_full(
     symbol: str,
     interval: str = "1m",
-    days: int = 90,
+    days: int = 2,
 ) -> pd.DataFrame:
     """
-    Fetch multiple pages of klines to cover `days` of history.
+    Fetch multiple pages of futures klines to cover `days` of history.
     """
     all_dfs: List[pd.DataFrame] = []
     end_time = int(time.time() * 1000)
     interval_ms = _interval_to_ms(interval)
     start_time = end_time - (days * 24 * 60 * 60 * 1000)
 
-    logger.info(f"[{symbol}] Fetching {days}d of {interval} data...")
+    logger.info(f"[{symbol}] Fetching {days}d of {interval} futures data...")
     current_start = start_time
 
-    for _ in range(15):  # Limit loop count to avoid hanging
+    for _ in range(15):
         if current_start >= end_time:
             break
         batch_end = min(current_start + 1000 * interval_ms, end_time)
@@ -90,7 +100,7 @@ async def fetch_klines_full(
     result = pd.concat(all_dfs)
     result = result[~result.index.duplicated(keep="last")]
     result.sort_index(inplace=True)
-    logger.success(f"[{symbol}] Fetched {len(result)} candles ({days}d {interval})")
+    logger.success(f"[{symbol}] Fetched {len(result)} candles ({days}d {interval} futures)")
     return result
 
 
@@ -123,14 +133,14 @@ def _interval_to_ms(interval: str) -> int:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# WEBSOCKET CLIENT – Live Data Stream
+# WEBSOCKET CLIENT – Live Futures Stream
 # ─────────────────────────────────────────────────────────────────────────────
 
 class BinanceStreamManager:
     """
-    Manages WebSocket connection to Binance for up to 300+ symbols.
-    Subscribes via JSON payload in chunks of 50 to avoid URI length limits.
-    Fires a callback on every kline event.
+    Manages WebSocket connection to Binance FUTURES stream (fstream.binance.com).
+    Subscribes in batches of 50 streams via JSON payload to avoid URI limits.
+    Fires a callback on every closed kline event.
     """
 
     def __init__(self, symbols: List[str], on_kline_close: Callable):
@@ -141,17 +151,11 @@ class BinanceStreamManager:
 
     async def start(self):
         self._running = True
-        ws_endpoints = [
-            "wss://stream.binance.com:9443/ws",
-            "wss://data-stream.binance.vision/ws",
-            "wss://stream.binance.com:443/ws",
-        ]
         endpoint_idx = 0
-
-        logger.info(f"Connecting to Binance WS for {len(self.symbols)} symbols...")
+        logger.info(f"Connecting to Binance Futures WS for {len(self.symbols)} symbols...")
 
         while self._running:
-            url = ws_endpoints[endpoint_idx % len(ws_endpoints)]
+            url = FSTREAM_ENDPOINTS[endpoint_idx % len(FSTREAM_ENDPOINTS)]
             try:
                 async with websockets.connect(
                     url,
@@ -161,31 +165,30 @@ class BinanceStreamManager:
                     max_size=10_000_000,
                 ) as ws:
                     self._ws = ws
-                    logger.success(f"[OK] Binance WebSocket connected to {url}")
+                    logger.success(f"[OK] Futures WebSocket connected: {url}")
 
                     # Subscribe in batches of 50 streams
                     all_streams = [f"{s}@kline_{settings.TIMEFRAME}" for s in self.symbols]
-                    chunk_size = 50
-                    for i in range(0, len(all_streams), chunk_size):
-                        chunk = all_streams[i : i + chunk_size]
-                        sub_msg = {
+                    for i in range(0, len(all_streams), 50):
+                        chunk = all_streams[i: i + 50]
+                        await ws.send(json.dumps({
                             "method": "SUBSCRIBE",
                             "params": chunk,
                             "id": i + 1,
-                        }
-                        await ws.send(json.dumps(sub_msg))
+                        }))
                         await asyncio.sleep(0.05)
 
-                    logger.info(f"Subscribed to {len(all_streams)} kline streams successfully")
+                    logger.info(f"Subscribed to {len(all_streams)} futures kline streams")
 
                     async for message in ws:
                         await self._handle_message(message)
+
             except websockets.ConnectionClosed as e:
-                logger.warning(f"WS connection closed: {e}. Reconnecting in 3s...")
+                logger.warning(f"Futures WS closed: {e}. Reconnecting in 3s...")
                 endpoint_idx += 1
                 await asyncio.sleep(3)
             except Exception as e:
-                logger.error(f"WS error: {e}. Reconnecting in 5s...")
+                logger.error(f"Futures WS error: {e}. Reconnecting in 5s...")
                 endpoint_idx += 1
                 await asyncio.sleep(5)
 
@@ -195,22 +198,23 @@ class BinanceStreamManager:
             await self._ws.close()
 
     async def _handle_message(self, raw: str):
-        """Parse incoming kline message and fire callback on candle close."""
+        """Parse incoming kline message and fire callback."""
         try:
             msg = json.loads(raw)
-            # Handle subscription responses
+
+            # Skip subscription ack messages
             if "result" in msg and "id" in msg:
                 return
 
-            # Support both {"data": {"k": ...}} and direct {"k": ...}
+            # Futures WS sends kline directly (not nested under "data")
             data = msg.get("data", msg)
             kline = data.get("k", {})
 
             if not kline:
                 return
 
-            is_closed = kline.get("x", False)
             symbol = kline.get("s", "").upper()
+            is_closed = kline.get("x", False)
 
             candle = {
                 "symbol": symbol,
@@ -226,17 +230,18 @@ class BinanceStreamManager:
             await self.on_kline_close(candle)
 
         except Exception as e:
-            logger.error(f"Error parsing WS message: {e}")
+            logger.error(f"Error parsing Futures WS message: {e}")
 
 
+# ── Price Ticker (Futures) ────────────────────────────────────────────────────
 _bulk_prices_cache: Dict[str, float] = {}
 
 
 async def fetch_all_ticker_prices() -> Dict[str, float]:
-    """Fetch live prices for all symbols in a single bulk REST call."""
+    """Fetch all futures perpetual prices in a single bulk REST call."""
     global _bulk_prices_cache
-    for base_url in BINANCE_REST_ENDPOINTS:
-        url = f"{base_url}/api/v3/ticker/price"
+    for base_url in FAPI_ENDPOINTS:
+        url = f"{base_url}/fapi/v1/ticker/price"
         try:
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=4)) as session:
                 async with session.get(url) as resp:
@@ -248,7 +253,7 @@ async def fetch_all_ticker_prices() -> Dict[str, float]:
                             if sym.endswith("USDT"):
                                 res[sym] = float(item["price"])
                         _bulk_prices_cache = res
-                        logger.info(f"Loaded {len(res)} bulk ticker prices from Binance")
+                        logger.info(f"[Futures] Loaded {len(res)} futures prices")
                         return res
         except Exception:
             continue
@@ -256,14 +261,14 @@ async def fetch_all_ticker_prices() -> Dict[str, float]:
 
 
 async def get_ticker_price(symbol: str) -> float:
-    """Fetch current price for a symbol using bulk cache, single endpoint, or realistic defaults."""
+    """Fetch current futures price for a symbol, using bulk cache first."""
     global _bulk_prices_cache
     sym = symbol.upper()
     if sym in _bulk_prices_cache:
         return _bulk_prices_cache[sym]
 
-    for base_url in BINANCE_REST_ENDPOINTS:
-        url = f"{base_url}/api/v3/ticker/price"
+    for base_url in FAPI_ENDPOINTS:
+        url = f"{base_url}/fapi/v1/ticker/price"
         try:
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=2)) as session:
                 async with session.get(url, params={"symbol": sym}) as resp:
@@ -275,12 +280,14 @@ async def get_ticker_price(symbol: str) -> float:
         except Exception:
             continue
 
-    # Fallback realistic prices
+    # Realistic fallback prices (updated to recent market levels)
     defaults = {
         "BTCUSDT": 64000.0, "ETHUSDT": 2450.0, "SOLUSDT": 140.0,
         "BNBUSDT": 560.0, "XRPUSDT": 0.58, "DOGEUSDT": 0.11,
-        "ADAUSDT": 0.36, "AVAXUSDT": 23.0, "DOTUSDT": 4.3,
+        "ADAUSDT": 0.36, "AVAXUSDT": 26.0, "DOTUSDT": 4.3,
         "SUIUSDT": 0.82, "NEARUSDT": 4.1, "LINKUSDT": 11.2,
-        "PEPEUSDT": 0.000008, "SHIBUSDT": 0.000014,
+        "PEPEUSDT": 0.0000085, "SHIBUSDT": 0.000014,
+        "LTCUSDT": 70.0, "UNIUSDT": 7.0, "APTUSDT": 6.5,
+        "TRXUSDT": 0.17, "ATOMUSDT": 5.0, "HBARUSDT": 0.075,
     }
     return defaults.get(sym, 1.0)
