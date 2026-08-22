@@ -66,7 +66,7 @@ class EMAMLStrategy:
 
         # Fallback synthetic buffer if REST is slow/unavailable
         if df_hist.empty or len(df_hist) < 220:
-            df_hist = self._generate_fast_fallback_buffer()
+            df_hist = await self._generate_fast_fallback_buffer()
 
         # ── Step 3: Pre-fill candle buffer ─────────────────────────────
         recent = df_hist.tail(self.BUFFER_SIZE)
@@ -82,9 +82,9 @@ class EMAMLStrategy:
 
         self.initialized = True
 
-    def _generate_fast_fallback_buffer(self) -> pd.DataFrame:
-        """Generate a 500-candle realistic buffer instantly without any network calls."""
-        base_price = 100.0
+    async def _generate_fast_fallback_buffer(self) -> pd.DataFrame:
+        """Generate a 500-candle realistic buffer anchored to the real market price."""
+        base_price = await get_ticker_price(self.symbol)
         now = pd.Timestamp.now(tz="UTC")
         timestamps = [now - pd.Timedelta(minutes=i) for i in range(500, 0, -1)]
 

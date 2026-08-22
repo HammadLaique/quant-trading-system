@@ -43,8 +43,10 @@ class StrategyRunner:
         asyncio.create_task(self._trade_scanner_loop())
         asyncio.create_task(self._coin_refresh_loop())
 
-        # Step 2: Get coin universe
+        # Step 2: Get coin universe and pre-fetch bulk ticker prices
+        from data.binance_client import fetch_all_ticker_prices
         symbols = await get_coin_universe()
+        await fetch_all_ticker_prices()
         logger.info(f"Trading universe loaded: {len(symbols)} coins")
 
         # Step 3: Create strategy instances

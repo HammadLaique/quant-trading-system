@@ -229,23 +229,58 @@ class BinanceStreamManager:
             logger.error(f"Error parsing WS message: {e}")
 
 
-async def get_ticker_price(symbol: str) -> float:
-    """Fetch current price for a symbol using multiple endpoint fallbacks."""
+_bulk_prices_cache: Dict[str, float] = {}
+
+
+async def fetch_all_ticker_prices() -> Dict[str, float]:
+    """Fetch live prices for all symbols in a single bulk REST call."""
+    global _bulk_prices_cache
     for base_url in BINANCE_REST_ENDPOINTS:
         url = f"{base_url}/api/v3/ticker/price"
         try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
-                async with session.get(url, params={"symbol": symbol.upper()}) as resp:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=4)) as session:
+                async with session.get(url) as resp:
                     if resp.status == 200:
                         data = await resp.json()
-                        return float(data["price"])
+                        res = {}
+                        for item in data:
+                            sym = item.get("symbol", "")
+                            if sym.endswith("USDT"):
+                                res[sym] = float(item["price"])
+                        _bulk_prices_cache = res
+                        logger.info(f"Loaded {len(res)} bulk ticker prices from Binance")
+                        return res
+        except Exception:
+            continue
+    return _bulk_prices_cache
+
+
+async def get_ticker_price(symbol: str) -> float:
+    """Fetch current price for a symbol using bulk cache, single endpoint, or realistic defaults."""
+    global _bulk_prices_cache
+    sym = symbol.upper()
+    if sym in _bulk_prices_cache:
+        return _bulk_prices_cache[sym]
+
+    for base_url in BINANCE_REST_ENDPOINTS:
+        url = f"{base_url}/api/v3/ticker/price"
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=2)) as session:
+                async with session.get(url, params={"symbol": sym}) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        price = float(data["price"])
+                        _bulk_prices_cache[sym] = price
+                        return price
         except Exception:
             continue
 
-    # Fallback default prices if REST API is completely unreachable
+    # Fallback realistic prices
     defaults = {
-        "BTCUSDT": 62000.0, "ETHUSDT": 3400.0, "SOLUSDT": 145.0,
-        "BNBUSDT": 570.0, "XRPUSDT": 0.58, "DOGEUSDT": 0.12,
-        "ADAUSDT": 0.38, "AVAXUSDT": 24.0, "DOTUSDT": 4.5,
+        "BTCUSDT": 64000.0, "ETHUSDT": 2450.0, "SOLUSDT": 140.0,
+        "BNBUSDT": 560.0, "XRPUSDT": 0.58, "DOGEUSDT": 0.11,
+        "ADAUSDT": 0.36, "AVAXUSDT": 23.0, "DOTUSDT": 4.3,
+        "SUIUSDT": 0.82, "NEARUSDT": 4.1, "LINKUSDT": 11.2,
+        "PEPEUSDT": 0.000008, "SHIBUSDT": 0.000014,
     }
-    return defaults.get(symbol.upper(), 10.0)
+    return defaults.get(sym, 1.0)
