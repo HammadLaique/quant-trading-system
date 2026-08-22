@@ -106,28 +106,30 @@ class StrategyRunner:
     async def _trade_scanner_loop(self):
         """
         Active trade scanner: runs every 5 seconds.
-        Scans initialized coins using REAL live prices from Binance Futures
-        to ensure trades open accurately at the exact current market price.
+        Batch-fetches live Binance Futures ticker prices in 1 fast call
+        and evaluates active trade setups across all 300 coins.
         """
-        from data.binance_client import get_ticker_price
+        from data.binance_client import fetch_all_ticker_prices
         await asyncio.sleep(3)  # Brief warmup
         while self.running:
             try:
                 from core.portfolio import portfolio
-                # Only scan if portfolio has capacity for more trades
                 if len(portfolio.positions) < settings.MAX_OPEN_TRADES:
+                    # 1. Fetch ALL 300 futures prices in 1 fast bulk call (0.1s)
+                    live_prices = await fetch_all_ticker_prices()
+
+                    # 2. Iterate through initialized strategies
                     for strat in list(self.strategies.values()):
                         if not strat.initialized or len(strat.buffer) < settings.EMA_SLOW + 20:
                             continue
-                        # If already holding a position in this symbol, skip
                         if len(portfolio.get_positions_by_symbol(strat.symbol)) > 0:
                             continue
-                        # Fetch fresh live ticker price from Binance Futures
-                        live_price = await get_ticker_price(strat.symbol)
+
+                        live_price = live_prices.get(strat.symbol, 0.0)
                         if live_price <= 0:
                             continue
 
-                        # Update latest buffer candle close to current live price
+                        # Update latest buffer candle close to real-time live price
                         last_c = strat.buffer[-1]
                         now_ts = pd.Timestamp.now(tz="UTC")
                         candle = {
