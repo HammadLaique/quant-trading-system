@@ -175,13 +175,18 @@ class EMAMLStrategy:
             return
 
         # ── Execute Trade ───────────────────────────────────────────────
+        # Always fetch fresh live price from Binance Futures at the exact moment of order placement
+        live_entry_price = await get_ticker_price(self.symbol)
+        if live_entry_price <= 0:
+            live_entry_price = current_price
+
         direction_str = "LONG" if signal == 1 else "SHORT"
-        logger.info(f"[{self.symbol}] [SIGNAL] {direction_str} | Price: {current_price:.4f} | Win prob: {win_prob:.3f}")
+        logger.info(f"[{self.symbol}] [SIGNAL] {direction_str} | Entry Price: {live_entry_price:.4f} | Win prob: {win_prob:.3f}")
 
         order_manager.open_trade(
             symbol=self.symbol,
             direction=signal,
-            entry_price=current_price,
+            entry_price=live_entry_price,
             atr=float(df["ATR"].iloc[-1]),
             df_slice=df,
             leverage=self.leverage,

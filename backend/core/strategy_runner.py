@@ -106,9 +106,10 @@ class StrategyRunner:
     async def _trade_scanner_loop(self):
         """
         Active trade scanner: runs every 5 seconds.
-        Evaluates signals on buffered candles across all initialized coins
-        to ensure trades are entered promptly whenever opportunities arise.
+        Scans initialized coins using REAL live prices from Binance Futures
+        to ensure trades open accurately at the exact current market price.
         """
+        from data.binance_client import get_ticker_price
         await asyncio.sleep(3)  # Brief warmup
         while self.running:
             try:
@@ -121,19 +122,26 @@ class StrategyRunner:
                         # If already holding a position in this symbol, skip
                         if len(portfolio.get_positions_by_symbol(strat.symbol)) > 0:
                             continue
-                        # Simulate latest candle check to trigger any pending signals
-                        if strat.buffer:
-                            last_c = strat.buffer[-1]
-                            await strat.on_candle({
-                                "symbol": strat.symbol,
-                                "open_time": last_c["open_time"],
-                                "open": last_c["Open"],
-                                "high": last_c["High"],
-                                "low": last_c["Low"],
-                                "close": last_c["Close"],
-                                "volume": last_c["Volume"],
-                                "is_closed": True,
-                            })
+                        # Fetch fresh live ticker price from Binance Futures
+                        live_price = await get_ticker_price(strat.symbol)
+                        if live_price <= 0:
+                            continue
+
+                        # Update latest buffer candle close to current live price
+                        last_c = strat.buffer[-1]
+                        now_ts = pd.Timestamp.now(tz="UTC")
+                        candle = {
+                            "symbol": strat.symbol,
+                            "open_time": now_ts,
+                            "open": last_c["Open"],
+                            "high": max(last_c["High"], live_price),
+                            "low": min(last_c["Low"], live_price),
+                            "close": live_price,
+                            "volume": last_c["Volume"],
+                            "is_closed": True,
+                        }
+                        await strat.on_candle(candle)
+
                         if len(portfolio.positions) >= settings.MAX_OPEN_TRADES:
                             break
             except Exception as e:
