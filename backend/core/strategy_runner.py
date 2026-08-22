@@ -1,9 +1,8 @@
 """
 Strategy Runner.
 Manages all strategy instances across up to 300 trending coins.
-Initializes strategies in batches, subscribes to Binance WebSocket streams,
-routes incoming candle data to the correct strategy, and refreshes the coin
-universe every 24 hours.
+Initializes strategies concurrently in seconds, subscribes to Binance WebSocket streams,
+periodically broadcasts state to dashboard, and executes trade setups actively.
 """
 
 import asyncio
@@ -11,7 +10,7 @@ from typing import Dict, List
 from loguru import logger
 
 from config import settings
-from data.coin_universe import get_coin_universe, maybe_refresh_coin_universe, refresh_coin_universe
+from data.coin_universe import get_coin_universe, refresh_coin_universe
 from data.binance_client import BinanceStreamManager
 from strategies.ema_ml_strategy import EMAMLStrategy
 from api.ws_handler import broadcast_tick, broadcast_trade_event, broadcast_portfolio
@@ -20,15 +19,13 @@ from api.ws_handler import broadcast_tick, broadcast_trade_event, broadcast_port
 class StrategyRunner:
     """
     Central orchestrator that:
-    1. Fetches top 100 coins
-    2. Creates per-coin strategy instances
-    3. Initializes strategies in parallel batches (avoid rate limits)
-    4. Starts Binance WebSocket and routes candles to strategies
-    5. Periodically broadcasts state to connected WebSocket clients
+    1. Fetches top trending coins
+    2. Instantly initializes strategies in parallel
+    3. Starts background broadcast and market scanning loops
+    4. Connects Binance WebSocket stream
     """
 
-    INIT_BATCH_SIZE = 25   # Initialize N strategies at a time
-    INIT_BATCH_DELAY = 0.1  # Seconds between batches
+    INIT_BATCH_SIZE = 50
 
     def __init__(self):
         self.strategies: Dict[str, EMAMLStrategy] = {}
@@ -37,59 +34,54 @@ class StrategyRunner:
         self.initialized_count = 0
 
     async def start(self):
-        """Main entry point. Starts everything."""
+        """Main entry point. Starts all systems."""
         logger.info("[START] Starting StrategyRunner...")
         self.running = True
 
-        # Step 1: Get coin universe
-        symbols = await get_coin_universe()
-        logger.info(f"Trading universe: {len(symbols)} coins")
+        # Step 1: Start background broadcast loop immediately
+        asyncio.create_task(self._broadcast_loop())
+        asyncio.create_task(self._trade_scanner_loop())
+        asyncio.create_task(self._coin_refresh_loop())
 
-        # Step 2: Create strategy instances
+        # Step 2: Get coin universe
+        symbols = await get_coin_universe()
+        logger.info(f"Trading universe loaded: {len(symbols)} coins")
+
+        # Step 3: Create strategy instances
         for symbol in symbols:
             self.strategies[symbol] = EMAMLStrategy(
                 symbol=symbol,
                 leverage=settings.DEFAULT_LEVERAGE,
             )
 
-        # Step 3: Initialize strategies in batches
+        # Step 4: Rapid parallel initialization (takes ~1-2 seconds total)
         await self._initialize_all_strategies(symbols)
 
-        # Step 4: Start WebSocket stream for all coins
+        # Step 5: Start WebSocket stream for all coins
         active_symbols = [s for s, strat in self.strategies.items() if strat.initialized]
-        logger.info(f"Starting WS stream for {len(active_symbols)} initialized strategies")
+        logger.info(f"Starting Binance WS stream for {len(active_symbols)} active symbols")
 
         self.stream_manager = BinanceStreamManager(
             symbols=active_symbols,
             on_kline_close=self._on_kline,
         )
 
-        # Step 5: Start background tasks
-        asyncio.create_task(self._broadcast_loop())
-        asyncio.create_task(self._coin_refresh_loop())
-
-        # Step 6: Start WebSocket (runs forever)
+        # WebSocket stream runs forever
         await self.stream_manager.start()
 
     async def _initialize_all_strategies(self, symbols: List[str]):
-        """Initialize strategies in batches to respect rate limits."""
+        """Initialize strategies in fast concurrent batches."""
         total = len(symbols)
-        logger.info(f"Initializing {total} strategies in batches of {self.INIT_BATCH_SIZE}...")
+        logger.info(f"Initializing {total} strategies in parallel...")
 
         for i in range(0, total, self.INIT_BATCH_SIZE):
-            batch = symbols[i: i + self.INIT_BATCH_SIZE]
-            tasks = [self.strategies[s].initialize() for s in batch]
+            batch = symbols[i : i + self.INIT_BATCH_SIZE]
+            tasks = [self.strategies[s].initialize() for s in batch if s in self.strategies]
             await asyncio.gather(*tasks, return_exceptions=True)
 
             self.initialized_count = sum(
-                1 for s in symbols if self.strategies[s].initialized
+                1 for s in symbols if s in self.strategies and self.strategies[s].initialized
             )
-
-            progress = min(i + self.INIT_BATCH_SIZE, total)
-            logger.info(f"Initialized {progress}/{total} strategies...")
-
-            if i + self.INIT_BATCH_SIZE < total:
-                await asyncio.sleep(self.INIT_BATCH_DELAY)
 
         logger.success(f"[OK] All strategies initialized. Active: {self.initialized_count}/{total}")
 
@@ -109,8 +101,45 @@ class StrategyRunner:
             "is_closed": candle.get("is_closed", False),
         })
 
+    async def _trade_scanner_loop(self):
+        """
+        Active trade scanner: runs every 5 seconds.
+        Evaluates signals on buffered candles across all initialized coins
+        to ensure trades are entered promptly whenever opportunities arise.
+        """
+        await asyncio.sleep(3)  # Brief warmup
+        while self.running:
+            try:
+                from core.portfolio import portfolio
+                # Only scan if portfolio has capacity for more trades
+                if len(portfolio.positions) < settings.MAX_OPEN_TRADES:
+                    for strat in list(self.strategies.values()):
+                        if not strat.initialized or len(strat.buffer) < settings.EMA_SLOW + 20:
+                            continue
+                        # If already holding a position in this symbol, skip
+                        if len(portfolio.get_positions_by_symbol(strat.symbol)) > 0:
+                            continue
+                        # Simulate latest candle check to trigger any pending signals
+                        if strat.buffer:
+                            last_c = strat.buffer[-1]
+                            await strat.on_candle({
+                                "symbol": strat.symbol,
+                                "open_time": last_c["open_time"],
+                                "open": last_c["Open"],
+                                "high": last_c["High"],
+                                "low": last_c["Low"],
+                                "close": last_c["Close"],
+                                "volume": last_c["Volume"],
+                                "is_closed": True,
+                            })
+                        if len(portfolio.positions) >= settings.MAX_OPEN_TRADES:
+                            break
+            except Exception as e:
+                logger.error(f"Scanner error: {e}")
+            await asyncio.sleep(5)
+
     async def _broadcast_loop(self):
-        """Periodically broadcast portfolio state to all WS clients."""
+        """Periodically broadcast portfolio state to all WS clients every 2 seconds."""
         from core.portfolio import portfolio
         while self.running:
             try:
@@ -131,11 +160,11 @@ class StrategyRunner:
                 })
             except Exception as e:
                 logger.error(f"Broadcast error: {e}")
-            await asyncio.sleep(2)  # Broadcast every 2 seconds
+            await asyncio.sleep(2)
 
     async def _coin_refresh_loop(self):
         """Every 24 hours, refresh the coin universe and spin up strategies for new coins."""
-        REFRESH_EVERY = 24 * 60 * 60  # 24 hours in seconds
+        REFRESH_EVERY = 24 * 60 * 60
         while self.running:
             await asyncio.sleep(REFRESH_EVERY)
             try:
@@ -149,11 +178,8 @@ class StrategyRunner:
                         if strat.initialized:
                             self.strategies[sym] = strat
                             added += 1
-                        await asyncio.sleep(0.05)  # Slight delay between new inits
                 if added:
                     logger.success(f"[Coin Refresh] Added {added} new coins to the universe")
-                else:
-                    logger.info("[Coin Refresh] No new coins added")
             except Exception as e:
                 logger.error(f"[Coin Refresh] Error during refresh: {e}")
 
@@ -173,4 +199,3 @@ class StrategyRunner:
 
 # Global runner instance
 runner = StrategyRunner()
-

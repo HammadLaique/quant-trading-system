@@ -1,4 +1,4 @@
-﻿"""
+"""
 WebSocket Handler.
 Manages all connected dashboard clients and broadcasts real-time events.
 """
@@ -70,11 +70,18 @@ async def websocket_endpoint(websocket: WebSocket):
     """FastAPI WebSocket endpoint handler."""
     await manager.connect(websocket)
     try:
-        # Send initial portfolio snapshot
+        # Send initial portfolio snapshot + strategy status
         from core.portfolio import portfolio
+        from core.strategy_runner import runner
         await manager.send_personal(websocket, {
             "type": "init",
             **portfolio.get_stats(),
+            "equity_curve": portfolio.equity_history[-100:],
+            "open_positions": [p.to_dict() for p in portfolio.positions.values()],
+            "recent_trades": [t.to_dict() for t in portfolio.closed_trades[-20:]],
+            "strategy_status": [
+                s.get_status() for s in runner.strategies.values() if s.initialized
+            ],
         })
 
         # Keep connection alive, listening for client pings
