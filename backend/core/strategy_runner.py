@@ -129,7 +129,7 @@ class StrategyRunner:
                         if live_price <= 0:
                             continue
 
-                        # Update latest buffer candle close to real-time live price
+                        # Update latest price for scanning
                         last_c = strat.buffer[-1]
                         now_ts = pd.Timestamp.now(tz="UTC")
                         candle = {
@@ -140,7 +140,8 @@ class StrategyRunner:
                             "low": min(last_c["Low"], live_price),
                             "close": live_price,
                             "volume": last_c["Volume"],
-                            "is_closed": True,
+                            "is_closed": False,
+                            "is_scan": True,
                         }
                         await strat.on_candle(candle)
 

@@ -121,19 +121,23 @@ class EMAMLStrategy:
             self.symbol, current_price, is_closed=candle["is_closed"]
         )
 
-        if not candle["is_closed"]:
+        if candle.get("is_scan", False):
+            # Update latest candle close price temporarily for scanning
+            if self.buffer:
+                self.buffer[-1]["Close"] = current_price
+        elif candle["is_closed"]:
+            self.buffer.append({
+                "open_time": candle["open_time"],
+                "Open": candle["open"],
+                "High": candle["high"],
+                "Low": candle["low"],
+                "Close": candle["close"],
+                "Volume": candle["volume"],
+            })
+        else:
             return
 
-        self.buffer.append({
-            "open_time": candle["open_time"],
-            "Open": candle["open"],
-            "High": candle["high"],
-            "Low": candle["low"],
-            "Close": candle["close"],
-            "Volume": candle["volume"],
-        })
-
-        if len(self.buffer) < settings.EMA_SLOW + 20:
+        if len(self.buffer) < 30:
             return
 
         df = pd.DataFrame(list(self.buffer))

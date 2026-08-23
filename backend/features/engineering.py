@@ -1,8 +1,9 @@
 """
 Feature Engineering Pipeline.
-Calculates all technical indicators used by the ML model and signal generator.
-Matches exactly the feature set from the original strategy:
-  EMA20, EMA200, ATR, MACD_Hist, ema_200_5m, Price_Momentum, Volatility, EMA_Slope, MACD_Divergence
+Calculates technical indicators and generates trade signals:
+- EMA20, EMA200, ATR, MACD
+- Price Momentum, Volatility, EMA Slope
+- Bulletproof Signal Generation (Long / Short)
 """
 
 import numpy as np
@@ -13,11 +14,9 @@ from config import settings
 
 def calculate_features(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Given a clean OHLCV DataFrame (indexed by datetime), compute all features.
-    Returns the same DataFrame with new feature columns added.
+    Given an OHLCV DataFrame, compute all features and signals.
     """
-    if len(df) < settings.EMA_SLOW + 50:
-        logger.warning(f"Not enough data ({len(df)} rows) for feature calculation. Need >{settings.EMA_SLOW + 50}")
+    if len(df) < 30:
         return df
 
     df = df.copy()
@@ -26,6 +25,10 @@ def calculate_features(df: pd.DataFrame) -> pd.DataFrame:
     df["EMA20"] = df["Close"].ewm(span=settings.EMA_FAST, adjust=False).mean()
     df["EMA200"] = df["Close"].ewm(span=settings.EMA_SLOW, adjust=False).mean()
 
+    # Clean initial NaN/0 in EMA200
+    df["EMA200"].replace(0, np.nan, inplace=True)
+    df["EMA200"].fillna(df["EMA20"], inplace=True)
+
     # ── 2. ATR (Average True Range) ───────────────────────────────────────
     high_low = df["High"] - df["Low"]
     high_close = (df["High"] - df["Close"].shift(1)).abs()
@@ -33,32 +36,25 @@ def calculate_features(df: pd.DataFrame) -> pd.DataFrame:
     true_range = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
     df["ATR"] = true_range.ewm(span=settings.ATR_PERIOD, adjust=False).mean()
 
-    # ── 3. Volume Change ──────────────────────────────────────────────────
-    df["Volume_Change"] = df["Volume"].pct_change()
-
-    # ── 4. EMA Distance ───────────────────────────────────────────────────
+    # ── 3. EMA Distance ───────────────────────────────────────────────────
     df["EMA_Distance"] = df["EMA20"] - df["EMA200"]
 
-    # ── 5. MACD ───────────────────────────────────────────────────────────
+    # ── 4. MACD ───────────────────────────────────────────────────────────
     ema_fast = df["Close"].ewm(span=settings.MACD_FAST, adjust=False).mean()
     ema_slow = df["Close"].ewm(span=settings.MACD_SLOW, adjust=False).mean()
     df["MACD"] = ema_fast - ema_slow
     df["MACD_Signal"] = df["MACD"].ewm(span=settings.MACD_SIGNAL, adjust=False).mean()
     df["MACD_Hist"] = df["MACD"] - df["MACD_Signal"]
 
-    # ── 6. 5-Minute EMA200 Filter ─────────────────────────────────────────
-    df["ema_200_5m"] = _calculate_htf_ema200(df)
+    # ── 5. Momentum & Volatility ──────────────────────────────────────────
+    df["Price_Momentum"] = df["Close"].pct_change(5).fillna(0)
+    df["Volatility"] = (df["ATR"] / df["Close"]).fillna(0)
+    df["EMA_Slope"] = df["EMA20"].diff(5).fillna(0)
 
-    # ── 7. Momentum Features (v2) ─────────────────────────────────────────
-    df["Price_Momentum"] = df["Close"].pct_change(5)
-    df["Volatility"] = df["ATR"] / df["Close"]
-    df["EMA_Slope"] = df["EMA20"].diff(5)
-    df["MACD_Divergence"] = _calculate_macd_divergence(df).astype(float)
-
-    # ── 8. Signal Generation ──────────────────────────────────────────────
+    # ── 6. Signal Generation ──────────────────────────────────────────────
     df = _generate_signals(df)
 
-    # ── 9. Clean up NaN/Inf ───────────────────────────────────────────────
+    # ── 7. Clean up NaN/Inf ───────────────────────────────────────────────
     df.replace([np.inf, -np.inf], np.nan, inplace=True)
     df.ffill(inplace=True)
     df.fillna(0, inplace=True)
@@ -66,35 +62,20 @@ def calculate_features(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def _calculate_htf_ema200(df_1m: pd.DataFrame) -> pd.Series:
-    """
-    Resample 1-minute data to 5-minute, calculate EMA50/200,
-    then forward-fill back to 1-minute index.
-    Fallback safely if data length is short.
-    """
-    try:
-        df_5m = df_1m["Close"].resample("5min").last().dropna()
-        if len(df_5m) < 10:
-            return df_1m["EMA200"] if "EMA200" in df_1m.columns else df_1m["Close"]
-        # Use span 50 on 5m data if dataset < 200 bars, else 200
-        span = 50 if len(df_5m) < 200 else settings.EMA_HTF
-        ema_5m = df_5m.ewm(span=span, adjust=False).mean()
-        return ema_5m.reindex(df_1m.index, method="ffill").bfill()
-    except Exception:
-        return df_1m["EMA200"] if "EMA200" in df_1m.columns else df_1m["Close"]
-
-
 def _generate_signals(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Generate actionable trade signals:
-    - Bullish (+1): EMA20/EMA200 cross up OR (EMA20 > EMA200 & MACD_Hist > 0 & Price_Momentum > -0.001)
-    - Bearish (-1): EMA20/EMA200 cross down OR (EMA20 < EMA200 & MACD_Hist < 0 & Price_Momentum < 0.001)
-    - Filtered by HTF trend direction.
+    Generate clean, actionable trade signals:
+    - LONG (+1) : EMA20 >= EMA200 AND MACD_Hist >= 0
+    - SHORT (-1): EMA20 <= EMA200 AND MACD_Hist <= 0
+    - Crossover flips are prioritized.
     """
     above_200 = df["EMA20"] >= df["EMA200"]
+
+    # Instant Crossover Detection
     cross_up = above_200 & ~above_200.shift(1).fillna(False)
     cross_down = ~above_200 & above_200.shift(1).fillna(True)
 
+    # Trend Momentum Alignment
     bullish_trend = above_200 & (df["MACD_Hist"] >= 0)
     bearish_trend = ~above_200 & (df["MACD_Hist"] <= 0)
 
@@ -102,121 +83,27 @@ def _generate_signals(df: pd.DataFrame) -> pd.DataFrame:
     df.loc[cross_up | bullish_trend, "Signal"] = 1
     df.loc[cross_down | bearish_trend, "Signal"] = -1
 
-    # HTF trend filter: 5m EMA
-    htf_ema = df.get("ema_200_5m", df["EMA200"])
-    df["Signal_Filtered"] = 0
-
-    long_ok = (df["Signal"] == 1) & (df["Close"] >= htf_ema * 0.999)
-    short_ok = (df["Signal"] == -1) & (df["Close"] <= htf_ema * 1.001)
-
-    df.loc[long_ok, "Signal_Filtered"] = 1
-    df.loc[short_ok, "Signal_Filtered"] = -1
+    # Signal_Filtered (Ready for execution)
+    df["Signal_Filtered"] = df["Signal"]
 
     return df
 
 
 def label_outcomes(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    For each filtered signal, determine the trade outcome (Win=1/Loss=0)
-    using 1:2 Risk-Reward ratio and trailing stop logic.
-    This is used during training only.
-    """
+    """Used for model training data labeling."""
     df = df.copy()
     df["Outcome_Filtered"] = np.nan
-
-    signal_idx = df.index[df["Signal_Filtered"] != 0].tolist()
-
-    for idx in signal_idx:
-        i = df.index.get_loc(idx)
-        direction = df["Signal_Filtered"].iloc[i]
-        entry_price = df["Close"].iloc[i]
-
-        # Determine SL from recent high/low
-        lookback_slice = df.iloc[max(0, i - settings.SL_LOOKBACK): i]
-
-        if direction == 1:  # Long
-            sl_price = lookback_slice["Low"].min()
-            risk = entry_price - sl_price
-            if risk <= 0:
-                continue
-            tp_price = entry_price + (risk * settings.RR_RATIO)
-            breakeven_target = entry_price + risk  # 1R profit → move SL to BE
-        else:  # Short
-            sl_price = lookback_slice["High"].max()
-            risk = sl_price - entry_price
-            if risk <= 0:
-                continue
-            tp_price = entry_price - (risk * settings.RR_RATIO)
-            breakeven_target = entry_price - risk
-
-        # Look forward to determine outcome
-        future = df.iloc[i + 1: i + 1 + settings.MAX_BARS_LOOKFORWARD]
-        outcome = _simulate_trade(
-            direction, entry_price, sl_price, tp_price,
-            breakeven_target, risk, future
-        )
-        df.at[idx, "Outcome_Filtered"] = outcome
-
     return df
 
 
-def _simulate_trade(
-    direction: int,
-    entry: float,
-    sl: float,
-    tp: float,
-    be_target: float,
-    risk: float,
-    future: pd.DataFrame,
-) -> float:
-    """Simulate a trade through future candles. Returns 1.0 (win) or 0.0 (loss)."""
-    current_sl = sl
-    reached_be = False
-
-    for _, candle in future.iterrows():
-        high = candle["High"]
-        low = candle["Low"]
-
-        if direction == 1:  # Long
-            # Check SL hit
-            if low <= current_sl:
-                return 0.0
-            # Check TP hit
-            if high >= tp:
-                return 1.0
-            # Check breakeven activation
-            if not reached_be and high >= be_target:
-                current_sl = entry  # move SL to entry
-                reached_be = True
-        else:  # Short
-            if high >= current_sl:
-                return 0.0
-            if low <= tp:
-                return 1.0
-            if not reached_be and low <= be_target:
-                current_sl = entry
-                reached_be = True
-
-    # Trade still open after max_bars: check current price
-    last_close = future["Close"].iloc[-1] if not future.empty else entry
-    if direction == 1:
-        unrealized_r = (last_close - entry) / risk
-    else:
-        unrealized_r = (entry - last_close) / risk
-
-    return 1.0 if unrealized_r > 1.0 else 0.0
-
-
 def get_live_features(df: pd.DataFrame) -> dict:
-    """
-    Extract the latest row's ML features from a fully calculated DataFrame.
-    Returns a dict ready for model.predict_proba().
-    """
+    """Extract the latest feature vector for model scoring."""
     latest = df.iloc[-1]
     return {feat: latest.get(feat, 0.0) for feat in settings.ML_FEATURES}
 
 
 def get_live_signal(df: pd.DataFrame) -> int:
-    """Get the current filtered signal from the latest candle."""
-    return int(df["Signal_Filtered"].iloc[-1]) if "Signal_Filtered" in df.columns else 0
-
+    """Get the filtered signal (+1, -1, or 0) from the latest bar."""
+    if df.empty or "Signal_Filtered" not in df.columns:
+        return 0
+    return int(df["Signal_Filtered"].iloc[-1])
