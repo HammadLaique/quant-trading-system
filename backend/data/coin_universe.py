@@ -82,21 +82,25 @@ async def _fetch_coingecko_trending() -> Set[str]:
     return symbols
 
 
-# ── Source 2 + 3: Binance Futures 24h Data ────────────────────────────────────
+# ── Source 2 + 3: Binance 24h Ticker Data (Futures + Open Vision fallback) ──────
 BINANCE_TICKER_ENDPOINTS = [
     "https://fapi.binance.com/fapi/v1/ticker/24hr",
     "https://fapi1.binance.com/fapi/v1/ticker/24hr",
+    "https://data-api.binance.vision/api/v3/ticker/24hr",
+    "https://api.binance.com/api/v3/ticker/24hr",
 ]
 
 
 async def _fetch_binance_tickers() -> list:
-    """Fetch all 24h ticker data from Binance FUTURES (perpetual)."""
+    """Fetch 24h ticker data from Binance endpoints with automatic fallback."""
     for url in BINANCE_TICKER_ENDPOINTS:
         try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=6)) as session:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
                 async with session.get(url) as resp:
                     if resp.status == 200:
-                        return await resp.json()
+                        data = await resp.json()
+                        if isinstance(data, list) and len(data) > 50:
+                            return data
         except Exception:
             continue
     return []

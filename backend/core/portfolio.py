@@ -347,4 +347,15 @@ class Portfolio:
             self.equity_history = self.equity_history[-10_000:]
 
 
+    def reset(self):
+        """Reset paper money portfolio to initial balance."""
+        self.balance = float(settings.INITIAL_BALANCE_USDT)
+        self.initial_balance = float(settings.INITIAL_BALANCE_USDT)
+        self.positions.clear()
+        self.closed_trades.clear()
+        self.equity_history.clear()
+        self._record_equity()
+        logger.info("[RESET] Portfolio reset to initial balance.")
+
+
 portfolio = Portfolio()

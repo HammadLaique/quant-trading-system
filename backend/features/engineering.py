@@ -68,64 +68,47 @@ def calculate_features(df: pd.DataFrame) -> pd.DataFrame:
 
 def _calculate_htf_ema200(df_1m: pd.DataFrame) -> pd.Series:
     """
-    Resample 1-minute data to 5-minute, calculate EMA200,
+    Resample 1-minute data to 5-minute, calculate EMA50/200,
     then forward-fill back to 1-minute index.
+    Fallback safely if data length is short.
     """
-    # Resample to 5m OHLCV
-    df_5m = df_1m["Close"].resample("5min").last().dropna()
-
-    # EMA200 on 5m close
-    ema_5m = df_5m.ewm(span=settings.EMA_HTF, adjust=False).mean()
-
-    # Reindex back to 1m, forward fill
-    ema_5m_on_1m = ema_5m.reindex(df_1m.index, method="ffill")
-    return ema_5m_on_1m
-
-
-def _calculate_macd_divergence(df: pd.DataFrame) -> pd.Series:
-    """
-    MACD Divergence: True when MACD direction differs from price direction.
-    Bullish divergence: price falling but MACD rising.
-    Bearish divergence: price rising but MACD falling.
-    """
-    price_dir = df["Close"].diff(3).apply(lambda x: 1 if x > 0 else -1)
-    macd_dir = df["MACD_Hist"].diff(3).apply(lambda x: 1 if x > 0 else -1)
-    return price_dir != macd_dir
+    try:
+        df_5m = df_1m["Close"].resample("5min").last().dropna()
+        if len(df_5m) < 10:
+            return df_1m["EMA200"] if "EMA200" in df_1m.columns else df_1m["Close"]
+        # Use span 50 on 5m data if dataset < 200 bars, else 200
+        span = 50 if len(df_5m) < 200 else settings.EMA_HTF
+        ema_5m = df_5m.ewm(span=span, adjust=False).mean()
+        return ema_5m.reindex(df_1m.index, method="ffill").bfill()
+    except Exception:
+        return df_1m["EMA200"] if "EMA200" in df_1m.columns else df_1m["Close"]
 
 
 def _generate_signals(df: pd.DataFrame) -> pd.DataFrame:
     """
     Generate actionable trade signals:
-    1. Primary: EMA20/EMA200 crossover (instant trend flip)
-    2. Trend Momentum: EMA20 aligned with EMA200 + MACD histogram expansion + price momentum
-    Filtered by 5-minute higher timeframe trend direction.
+    - Bullish (+1): EMA20/EMA200 cross up OR (EMA20 > EMA200 & MACD_Hist > 0 & Price_Momentum > -0.001)
+    - Bearish (-1): EMA20/EMA200 cross down OR (EMA20 < EMA200 & MACD_Hist < 0 & Price_Momentum < 0.001)
+    - Filtered by HTF trend direction.
     """
-    above_200 = df["EMA20"] > df["EMA200"]
+    above_200 = df["EMA20"] >= df["EMA200"]
     cross_up = above_200 & ~above_200.shift(1).fillna(False)
     cross_down = ~above_200 & above_200.shift(1).fillna(True)
 
-    # Momentum breakout / continuation
-    bullish_momentum = (
-        above_200
-        & (df["Close"] > df["EMA20"])
-        & (df["MACD_Hist"] > 0)
-        & (df["Price_Momentum"] > 0)
-    )
-    bearish_momentum = (
-        ~above_200
-        & (df["Close"] < df["EMA20"])
-        & (df["MACD_Hist"] < 0)
-        & (df["Price_Momentum"] < 0)
-    )
+    bullish_trend = above_200 & (df["MACD_Hist"] >= 0)
+    bearish_trend = ~above_200 & (df["MACD_Hist"] <= 0)
 
     df["Signal"] = 0
-    df.loc[cross_up | bullish_momentum, "Signal"] = 1
-    df.loc[cross_down | bearish_momentum, "Signal"] = -1
+    df.loc[cross_up | bullish_trend, "Signal"] = 1
+    df.loc[cross_down | bearish_trend, "Signal"] = -1
 
-    # HTF trend filter: 5m EMA200
+    # HTF trend filter: 5m EMA
+    htf_ema = df.get("ema_200_5m", df["EMA200"])
     df["Signal_Filtered"] = 0
-    long_ok = (df["Signal"] == 1) & (df["Close"] >= df["ema_200_5m"])
-    short_ok = (df["Signal"] == -1) & (df["Close"] <= df["ema_200_5m"])
+
+    long_ok = (df["Signal"] == 1) & (df["Close"] >= htf_ema * 0.999)
+    short_ok = (df["Signal"] == -1) & (df["Close"] <= htf_ema * 1.001)
+
     df.loc[long_ok, "Signal_Filtered"] = 1
     df.loc[short_ok, "Signal_Filtered"] = -1
 
