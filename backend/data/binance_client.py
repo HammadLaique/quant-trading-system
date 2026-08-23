@@ -235,59 +235,61 @@ class BinanceStreamManager:
 
 # ── Price Ticker (Futures) ────────────────────────────────────────────────────
 _bulk_prices_cache: Dict[str, float] = {}
+TICKER_REST_ENDPOINTS = [
+    "https://fapi.binance.com/fapi/v1/ticker/price",
+    "https://data-api.binance.vision/api/v3/ticker/price",
+    "https://api.binance.com/api/v3/ticker/price",
+]
 
 
 async def fetch_all_ticker_prices() -> Dict[str, float]:
-    """Fetch all futures perpetual prices in a single bulk REST call."""
+    """Fetch live ticker prices with automatic CDN fallback."""
     global _bulk_prices_cache
-    for base_url in FAPI_ENDPOINTS:
-        url = f"{base_url}/fapi/v1/ticker/price"
+    for url in TICKER_REST_ENDPOINTS:
         try:
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=4)) as session:
                 async with session.get(url) as resp:
                     if resp.status == 200:
                         data = await resp.json()
-                        res = {}
-                        for item in data:
-                            sym = item.get("symbol", "")
-                            if sym.endswith("USDT"):
-                                res[sym] = float(item["price"])
-                        _bulk_prices_cache = res
-                        logger.info(f"[Futures] Loaded {len(res)} futures prices")
-                        return res
+                        if isinstance(data, list) and len(data) > 10:
+                            res = {}
+                            for item in data:
+                                sym = item.get("symbol", "")
+                                if sym.endswith("USDT"):
+                                    res[sym] = float(item["price"])
+                            _bulk_prices_cache = res
+                            logger.info(f"[Prices] Loaded {len(res)} prices from {url}")
+                            return res
         except Exception:
             continue
     return _bulk_prices_cache
 
 
 async def get_ticker_price(symbol: str) -> float:
-    """Fetch current futures price for a symbol, using bulk cache first."""
+    """Fetch current price for a symbol using bulk cache, fallback REST, or defaults."""
     global _bulk_prices_cache
     sym = symbol.upper()
     if sym in _bulk_prices_cache:
         return _bulk_prices_cache[sym]
 
-    for base_url in FAPI_ENDPOINTS:
-        url = f"{base_url}/fapi/v1/ticker/price"
+    for base_url in TICKER_REST_ENDPOINTS:
+        url = base_url if "/ticker/price" in base_url else f"{base_url}/api/v3/ticker/price"
         try:
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=2)) as session:
                 async with session.get(url, params={"symbol": sym}) as resp:
                     if resp.status == 200:
                         data = await resp.json()
-                        price = float(data["price"])
-                        _bulk_prices_cache[sym] = price
-                        return price
+                        if isinstance(data, dict) and "price" in data:
+                            price = float(data["price"])
+                            _bulk_prices_cache[sym] = price
+                            return price
         except Exception:
             continue
 
-    # Realistic fallback prices (updated to recent market levels)
     defaults = {
         "BTCUSDT": 64000.0, "ETHUSDT": 2450.0, "SOLUSDT": 140.0,
         "BNBUSDT": 560.0, "XRPUSDT": 0.58, "DOGEUSDT": 0.11,
         "ADAUSDT": 0.36, "AVAXUSDT": 26.0, "DOTUSDT": 4.3,
         "SUIUSDT": 0.82, "NEARUSDT": 4.1, "LINKUSDT": 11.2,
-        "PEPEUSDT": 0.0000085, "SHIBUSDT": 0.000014,
-        "LTCUSDT": 70.0, "UNIUSDT": 7.0, "APTUSDT": 6.5,
-        "TRXUSDT": 0.17, "ATOMUSDT": 5.0, "HBARUSDT": 0.075,
     }
-    return defaults.get(sym, 1.0)
+    return defaults.get(sym, 10.0)

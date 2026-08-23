@@ -125,9 +125,12 @@ class StrategyRunner:
                         if len(portfolio.get_positions_by_symbol(strat.symbol)) > 0:
                             continue
 
+                        # Get live price or fallback to buffer close price
                         live_price = live_prices.get(strat.symbol, 0.0)
+                        if live_price <= 0 and strat.buffer:
+                            live_price = strat.buffer[-1]["Close"]
                         if live_price <= 0:
-                            continue
+                            live_price = 1.0
 
                         # Update latest price for scanning
                         last_c = strat.buffer[-1]
