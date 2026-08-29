@@ -1,4 +1,4 @@
-﻿"""
+"""
 Order Manager.
 Handles trade execution and live SL/TP/liquidation checks on every price tick.
 """
@@ -71,24 +71,20 @@ class OrderManager:
             leverage: Leverage multiplier
             win_probability: ML model confidence
         """
-        # SL based on recent high/low
-        lookback = df_slice.tail(settings.SL_LOOKBACK)
+        # Dynamic ATR / Percentage SL & 1:2 Risk-Reward TP calculation
+        risk = float(atr * 1.5) if (atr and atr > 0) else float(entry_price * 0.015)
 
-        if direction == 1:
-            sl_price = lookback["Low"].min()
-            risk = entry_price - sl_price
-            tp_price = entry_price + (risk * settings.RR_RATIO)
-        else:
-            sl_price = lookback["High"].max()
-            risk = sl_price - entry_price
-            tp_price = entry_price - (risk * settings.RR_RATIO)
+        # Enforce 1.0% min risk and 3.0% max risk distance from entry
+        min_risk = float(entry_price * 0.010)
+        max_risk = float(entry_price * 0.030)
+        risk = max(min_risk, min(max_risk, risk))
 
-        # Safety: SL must be meaningful (at least 0.1% from entry)
-        min_risk = entry_price * 0.001
-        if risk < min_risk:
-            sl_price = (entry_price - min_risk) if direction == 1 else (entry_price + min_risk)
-            risk = min_risk
-            tp_price = entry_price + (risk * settings.RR_RATIO) if direction == 1 else entry_price - (risk * settings.RR_RATIO)
+        if direction == 1:  # LONG
+            sl_price = float(entry_price - risk)
+            tp_price = float(entry_price + (risk * settings.RR_RATIO))
+        else:  # SHORT
+            sl_price = float(entry_price + risk)
+            tp_price = float(entry_price - (risk * settings.RR_RATIO))
 
         return portfolio.open_position(
             symbol=symbol,

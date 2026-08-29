@@ -120,7 +120,7 @@ class StrategyRunner:
 
                     # 2. Iterate through initialized strategies
                     for strat in list(self.strategies.values()):
-                        if not strat.initialized or len(strat.buffer) < settings.EMA_SLOW + 20:
+                        if not strat.initialized or len(strat.buffer) < 30:
                             continue
                         if len(portfolio.get_positions_by_symbol(strat.symbol)) > 0:
                             continue
