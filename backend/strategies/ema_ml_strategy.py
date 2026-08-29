@@ -137,20 +137,15 @@ class EMAMLStrategy:
         else:
             return
 
-        if len(self.buffer) < 30:
+        if len(self.buffer) < 20:
             return
 
-        df = pd.DataFrame(list(self.buffer))
-        df.set_index("open_time", inplace=True)
-        df.index = pd.DatetimeIndex(df.index)
+        closes = np.array([c["Close"] for c in self.buffer], dtype=np.float64)
+        highs = np.array([c["High"] for c in self.buffer], dtype=np.float64)
+        lows = np.array([c["Low"] for c in self.buffer], dtype=np.float64)
 
-        try:
-            df = calculate_features(df)
-        except Exception as e:
-            logger.error(f"[{self.symbol}] Feature calc error: {e}")
-            return
-
-        signal = get_live_signal(df)
+        from features.engineering import compute_fast_indicators
+        signal, atr, features = compute_fast_indicators(closes, highs, lows)
 
         if signal == 0:
             return
@@ -167,19 +162,12 @@ class EMAMLStrategy:
             return
 
         # ── ML Gate ────────────────────────────────────────────────────
-        win_prob = 0.5
-        should_trade = True
-
-        if self.model_ready:
-            features = get_live_features(df)
-            win_prob, should_trade = predictor.predict(self.symbol, features)
+        win_prob, should_trade = predictor.predict(self.symbol, features)
 
         if not should_trade:
-            logger.debug(f"[{self.symbol}] ML rejected trade (prob={win_prob:.3f} < {settings.WIN_PROB_THRESHOLD})")
             return
 
         # ── Execute Trade ───────────────────────────────────────────────
-        # Always fetch fresh live price from Binance Futures at the exact moment of order placement
         live_entry_price = await get_ticker_price(self.symbol)
         if live_entry_price <= 0:
             live_entry_price = current_price
@@ -191,8 +179,8 @@ class EMAMLStrategy:
             symbol=self.symbol,
             direction=signal,
             entry_price=live_entry_price,
-            atr=float(df["ATR"].iloc[-1]),
-            df_slice=df,
+            atr=atr,
+            df_slice=None,
             leverage=self.leverage,
             win_probability=win_prob,
         )
