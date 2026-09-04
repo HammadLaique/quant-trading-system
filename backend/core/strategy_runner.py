@@ -59,6 +59,28 @@ class StrategyRunner:
         # Step 4: Rapid parallel initialization (takes ~1-2 seconds total)
         await self._initialize_all_strategies(symbols)
 
+        # Step 4.5: Seed initial demo trade (SHORT ETH)
+        from core.portfolio import portfolio
+        from core.order_manager import order_manager
+        from data.binance_client import get_ticker_price
+        if len(portfolio.positions) == 0:
+            try:
+                eth_p = await get_ticker_price("ETHUSDT")
+                if eth_p <= 0:
+                    eth_p = 2450.0
+                order_manager.open_trade(
+                    symbol="ETHUSDT",
+                    direction=-1,  # SHORT ETH
+                    entry_price=eth_p,
+                    atr=eth_p * 0.015,
+                    df_slice=None,
+                    leverage=settings.DEFAULT_LEVERAGE,
+                    win_probability=0.75,
+                )
+                logger.success(f"[DEMO] Auto-opened SHORT ETH at ${eth_p:.2f}")
+            except Exception as e:
+                logger.error(f"Error opening demo trade: {e}")
+
         # Step 5: Start WebSocket stream for all coins
         active_symbols = [s for s, strat in self.strategies.items() if strat.initialized]
         logger.info(f"Starting Binance WS stream for {len(active_symbols)} active symbols")

@@ -136,6 +136,50 @@ async def get_coins():
     return {"count": len(coins), "coins": coins}
 
 
+from pydantic import BaseModel
+
+
+class OpenTradeRequest(BaseModel):
+    symbol: str = "ETHUSDT"
+    direction: str = "SHORT"  # "LONG" or "SHORT"
+    leverage: Optional[int] = None
+
+
+@router.post("/positions/open")
+async def open_trade_endpoint(req: OpenTradeRequest):
+    """Manually open a paper trading position on demand."""
+    from core.order_manager import order_manager
+    from data.binance_client import get_ticker_price
+    from config import settings
+
+    sym = req.symbol.upper()
+    if not sym.endswith("USDT"):
+        sym = f"{sym}USDT"
+
+    dir_val = -1 if req.direction.upper() in ["SHORT", "-1"] else 1
+    price = await get_ticker_price(sym)
+    if price <= 0:
+        price = 2450.0 if "ETH" in sym else 64000.0
+
+    pos = order_manager.open_trade(
+        symbol=sym,
+        direction=dir_val,
+        entry_price=price,
+        atr=price * 0.015,
+        df_slice=None,
+        leverage=req.leverage or settings.DEFAULT_LEVERAGE,
+        win_probability=0.75,
+    )
+    if pos:
+        logger.info(f"[MANUAL] Opened {req.direction.upper()} on {sym} at ${price:.2f}")
+        return {
+            "status": "success",
+            "message": f"Successfully opened {req.direction.upper()} on {sym}",
+            "position": pos.to_dict(),
+        }
+    raise HTTPException(status_code=400, detail="Failed to open position. Check margin or max trades limit.")
+
+
 @router.post("/portfolio/reset")
 async def reset_portfolio():
     """Reset the paper portfolio to initial state (emergency button)."""
