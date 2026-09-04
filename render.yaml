@@ -8,7 +8,7 @@ services:
       - key: PYTHONIOENCODING
         value: utf-8
       - key: TOP_N_COINS
-        value: "300"
+        value: "100"
       - key: INITIAL_BALANCE_USDT
         value: "100000"
       - key: DEFAULT_LEVERAGE

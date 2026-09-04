@@ -53,7 +53,7 @@ class TradingConfig(BaseSettings):
     # ─── BINANCE FUTURES (Perpetual) ─────────────────────────
     BINANCE_REST_URL: str = "https://fapi.binance.com"         # Futures REST API
     BINANCE_WS_URL: str = "wss://fstream.binance.com"          # Futures WebSocket stream
-    TOP_N_COINS: int = 300                                      # How many coins to track (top trending)
+    TOP_N_COINS: int = 100                                      # How many coins to track (top 100 trending)
     QUOTE_ASSET: str = "USDT"                                   # Base quote currency
 
     # ─── DATABASE ────────────────────────────────────────────
