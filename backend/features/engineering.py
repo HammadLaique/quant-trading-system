@@ -101,6 +101,14 @@ def calculate_features(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def label_outcomes(df: pd.DataFrame) -> pd.DataFrame:
+    """Used for model training data labeling."""
+    df = df.copy()
+    df["Outcome_Filtered"] = 0
+    return df
+
+
+
 def get_live_features(df: pd.DataFrame) -> dict:
     """Extract feature vector."""
     if isinstance(df, dict):
